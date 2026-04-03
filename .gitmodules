@@ -1,0 +1,3 @@
+[submodule "third_party/xmir-patcher"]
+	path = third_party/xmir-patcher
+	url = https://github.com/openwrt-xiaomi/xmir-patcher.git

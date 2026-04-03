@@ -1,0 +1,67 @@
+{
+  "log": {
+    "loglevel": "{{ xray.log_level | default('warning') }}"
+  },
+  "inbounds": [
+    {
+      "tag": "{{ xray.inbound.tag }}",
+      "listen": "{{ xray.inbound.listen }}",
+      "port": {{ xray.inbound.port }},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "{{ xray.vless_uuid }}",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "{{ xray.reality.dest }}",
+          "xver": {{ xray.reality.xver | default(0) }},
+          "serverNames": {{ xray.reality.server_names | tojson }},
+          "privateKey": "{{ xray.reality_private_key }}",
+          "shortIds": {{ xray.short_ids | tojson }},
+          "fingerprint": "{{ xray.reality.fingerprint | default('chrome') }}"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "to-mihomo",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "{{ xray.routing.socks_upstream_host }}",
+            "port": {{ xray.routing.socks_upstream_port }}
+          }
+        ]
+      }
+    },
+    {
+      "tag": "blocked",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["{{ xray.inbound.tag }}"],
+        "outboundTag": "to-mihomo"
+      }
+    ]
+  }
+}

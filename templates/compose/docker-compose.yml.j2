@@ -1,0 +1,29 @@
+services:
+{% if services.xray_server.enabled | default(true) %}
+  {{ services.xray_server.container_name }}:
+    image: {{ services.xray_server.image | tojson }}
+    container_name: {{ services.xray_server.container_name | tojson }}
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./configs/xray:/etc/xray:ro
+    command: ["run", "-c", "/etc/xray/config.json"]
+{% endif %}
+{% if services.mihomo.enabled | default(true) %}
+
+  {{ services.mihomo.container_name }}:
+    image: {{ services.mihomo.image | tojson }}
+    container_name: {{ services.mihomo.container_name | tojson }}
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./configs/mihomo:/root/.config/mihomo:ro
+{% endif %}
+{% if services.torrserver.enabled | default(true) %}
+
+  {{ services.torrserver.container_name }}:
+    image: {{ services.torrserver.image | tojson }}
+    container_name: {{ services.torrserver.container_name | tojson }}
+    restart: unless-stopped
+    network_mode: host
+{% endif %}

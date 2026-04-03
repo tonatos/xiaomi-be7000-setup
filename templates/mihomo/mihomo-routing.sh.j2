@@ -1,0 +1,39 @@
+#!/bin/sh
+# Правила прозрачной маршрутизации (пример). Проверьте интерфейсы и подсеть.
+# Включение: routing.apply_iptables в router.yaml
+
+CHAIN="MIHOMO_{{ services.mihomo.container_name | default('mihomo') | upper | replace('-', '_') }}"
+
+_start() {
+{% if routing.apply_iptables | default(false) %}
+    iptables -t nat -N "$CHAIN" 2>/dev/null || iptables -t nat -F "$CHAIN"
+    iptables -t nat -A "$CHAIN" -d 0.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 10.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 127.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 169.254.0.0/16 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 172.16.0.0/12 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 192.168.0.0/16 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 224.0.0.0/4 -j RETURN
+    iptables -t nat -A "$CHAIN" -d 240.0.0.0/4 -j RETURN
+    iptables -t nat -A "$CHAIN" -p tcp -j REDIRECT --to-ports {{ services.mihomo.redir_port }}
+    iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN" 2>/dev/null || \
+      iptables -t nat -A PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN"
+    logger -t mihomo-routing "iptables nat redirect -> {{ services.mihomo.redir_port }} for {{ routing.lan_cidr }}"
+{% else %}
+    logger -t mihomo-routing "apply_iptables=false — правила не применялись (настройте routing в router.yaml)"
+{% endif %}
+}
+
+_stop() {
+{% if routing.apply_iptables | default(false) %}
+    iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN" 2>/dev/null || true
+    iptables -t nat -F "$CHAIN" 2>/dev/null || true
+    iptables -t nat -X "$CHAIN" 2>/dev/null || true
+{% endif %}
+}
+
+case "$1" in
+    start) _start ;;
+    stop) _stop ;;
+    *) echo "usage: $0 start|stop" ;;
+esac

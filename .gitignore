@@ -1,0 +1,19 @@
+.venv/
+.venv-xmir/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/rendered/
+build/synced-from-router/
+.pytest_cache/
+.mypy_cache/
+
+# Секреты и локальные данные
+config/router.yaml
+config/router.secrets.yaml
+local/
+
+# IDE
+.idea/
+.vscode/

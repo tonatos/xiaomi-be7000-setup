@@ -1,0 +1,81 @@
+version: "3"
+
+vars:
+  PY: poetry run python
+
+tasks:
+  default:
+    desc: Справка по командам
+    cmds:
+      - task --list
+
+  install:
+    desc: Установить зависимости Poetry
+    cmds:
+      - poetry install
+
+  render:
+    desc: Локальный рендер шаблонов в build/rendered
+    cmds:
+      - "{{.PY}} -m xiaomi_router render"
+
+  render-live:
+    desc: Рендер с определением USB по SSH
+    cmds:
+      - "{{.PY}} -m xiaomi_router render --discover-usb"
+
+  deploy:
+    desc: Полный деплой на роутер (бэкап, upload, compose, smoke)
+    cmds:
+      - "{{.PY}} -m xiaomi_router deploy"
+
+  smoke:
+    desc: Проверки работоспособности по SSH
+    cmds:
+      - "{{.PY}} -m xiaomi_router smoke"
+
+  sync-pull:
+    desc: Скачать конфиги со стека на роутере
+    cmds:
+      - "{{.PY}} -m xiaomi_router sync-pull"
+
+  sync-push:
+    desc: Залить build/rendered и docker compose up
+    cmds:
+      - "{{.PY}} -m xiaomi_router sync-push"
+
+  vless-link:
+    desc: Напечатать VLESS (Reality) ссылку для клиента
+    cmds:
+      - "{{.PY}} -m xiaomi_router vless-link"
+
+  bootstrap-ssh:
+    desc: xmir-patcher connect + install_ssh, если SSH недоступен
+    cmds:
+      - task: xmir-deps
+      - "{{.PY}} -m xiaomi_router bootstrap-ssh"
+
+  xmir-deps:
+    internal: true
+    cmds:
+      - |
+        test -f third_party/xmir-patcher/requirements.txt || \
+          { echo "Инициализируйте submodule: git submodule update --init third_party/xmir-patcher"; exit 1; }
+      - poetry run pip install -q -r third_party/xmir-patcher/requirements.txt
+
+  diagnose:
+    desc: Диагностика Docker / USB на роутере
+    cmds:
+      - "{{.PY}} -m xiaomi_router diagnose"
+
+  setup-opkg-usb:
+    cmds:
+      - "{{.PY}} -m xiaomi_router setup-opkg-usb"
+
+  setup-entware:
+    cmds:
+      - "{{.PY}} -m xiaomi_router setup-entware"
+
+  setup-compose:
+    cmds:
+      - "{{.PY}} -m xiaomi_router setup-compose"
