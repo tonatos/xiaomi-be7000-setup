@@ -1,203 +1,78 @@
-# Скопируйте в config/router.yaml и подставьте значения.
-# SSH-пароль — в config/router.secrets.yaml (см. router.secrets.example.yaml).
+# Скопируйте в config/router.yaml и заполните под вашу установку.
+# Базовые значения хранятся в config/router.base.yaml.
+# Этот файл переопределяет базу, поэтому можно указать только нужные поля.
+#
+# Официальные ссылки:
+# - Xray config: https://xtls.github.io/config/
+# - mihomo config: https://wiki.metacubex.one/config/
 
 router:
+  # LAN IP/домен роутера для SSH.
   host: "192.168.31.1"
-  ssh_port: 22
-  ssh_user: "root"
-
-# Опционально: явный путь USB (иначе определяется по mi_docker.settings.device_uuid)
-usb:
-  mount_path: ""
-
-stack:
-  relative_dir: "stack"
-  backups_relative_dir: "backups"
-
-startup:
-  base_dir: "/data/startup"
-  autoruns_subdir: "autoruns"
-
-# Настройки Docker на роутере.
-# registry_mirrors — зеркала Docker Hub (docker.io). Применяются через UCI:
-# /etc/config/mi_docker -> globals.registry_mirrors, затем restart mi_docker.
-# Оставьте пустым [], чтобы не менять зеркала. Образы ghcr.io (xray) зеркалами не покрываются —
-# при необходимости замените image в services.xray_server.
-docker:
-  registry_mirrors:
-    - "https://cr.yandex"
-    - "https://dh-mirror.gitverse.ru"
+  # Пароль SSH (можно также через env ROUTER_SSH_PASSWORD).
+  ssh_password: "change-me"
 
 services:
   xray_server:
+    # Включить Xray-сервер.
     enabled: true
-    container_name: "xray-server"
-    image: "ghcr.io/xtls/xray-core:25.1.30"
   mihomo:
+    # Включить mihomo-клиент.
     enabled: true
-    container_name: "mihomo"
-    image: "docker.io/metacubex/mihomo:latest"
-    mixed_port: 7890
-    redir_port: 7891
   torrserver:
+    # Включить TorrServer.
     enabled: true
-    container_name: "torrserver"
-    image: "docker.io/yourok/torrserver:latest"
-    port: 8090
   metacubexd:
+    # Включить web-dashboard metacubexd.
     enabled: true
-    container_name: "metacubexd"
-    # Проверенный образ для arm64 (Xiaomi BE7000).
-    image: "gzxhwq/metacubexd:latest"
-    # Порт веб-дашборда на роутере: http://<router.host>:9099
-    port: 9099
-    # Опционально: фиксированный backend для дашборда.
-    # Если не задан, формируется автоматически как
-    # http://<router.host>:<mihomo.external-controller порт>.
-    # default_backend_url: "http://192.168.31.1:9010"
+  # Опционально: добавьте собственные сервисы в общий docker-compose.
+  # Формат каждого элемента — как в Docker Compose services.<name>.
+  # custom:
+  #   whoami:
+  #     image: "traefik/whoami:latest"
+  #     container_name: "whoami"
+  #     restart: unless-stopped
+  #     network_mode: host
 
-xray:
-  log_level: "warning"
-  inbound:
-    tag: "vless-reality-in"
-    listen: "0.0.0.0"
-    port: 443
-    protocol: "vless"
-  # Список клиентов xray-server (inbound)
-  clients:
-    - id: "00000000-0000-0000-0000-000000000000"
-      flow: "xtls-rprx-vision"
-  reality:
-    dest: "ya.ru:443"
-    xver: 0
-    server_names:
-      - "ya.ru"
-      - "vk.com"
-    # Приватный ключ пары (генерируется: xray x25519)
-    private_key: "REPLACE_WITH_REALITY_PRIVATE_KEY"
-    short_ids:
-      - "0123456789abcdef"
-    fingerprint: "chrome"
-  routing:
-    socks_upstream_host: "127.0.0.1"
-    socks_upstream_port: 7890
-
-# Публичный адрес для клиентов (WAN / VPS). Для vless-link и подсказок.
 public_endpoint:
+  # Публичный IP/домен для команды vless-link (WAN/VPS endpoint).
   host: ""
 
+xray:
+  clients:
+    - # UUID клиента VLESS.
+      id: "00000000-0000-0000-0000-000000000000"
+      # Flow клиента (для Reality обычно xtls-rprx-vision).
+      flow: "xtls-rprx-vision"
+  reality:
+    # Приватный ключ пары Reality (генерируется: `xray x25519`).
+    private_key: "YOUR_REALITY_PRIVATE_KEY_BASE64URL"
+    # Список short_id (hex), используемый клиентами.
+    short_ids:
+      - "0123456789abcdef"
+
 routing:
+  # Включить прозрачный прокси через iptables для LAN.
   apply_iptables: false
-  lan_cidr: "192.168.31.0/24"
-  # IP устройств, которым нужен прямой NAT (Xbox, PlayStation, Nintendo и др.).
-  # Mihomo завершает TCP-соединение и открывает новое от имени роутера, меняя
-  # source port — из-за этого Xbox не может определить NAT-тип. Устройства из
-  # этого списка обходят прозрачный прокси и используют стандартный NAT роутера.
-  # Назначьте таким устройствам статический DHCP и укажите их IP здесь:
+  # IP-адреса устройств, которые нужно исключить из transparent proxy.
   excluded_ips: []
-  # excluded_ips:
-  #   - "192.168.31.100"  # Xbox Series X
 
-# Конфигурация mihomo. Ключи используют оригинальные имена (с дефисами),
-# так как разделы сериализуются напрямую в YAML через фильтр toyaml.
 mihomo:
-  mode: rule
-  log-level: info
-
-  tun:
-    enable: false
-    stack: system
-
-  sniffer:
-    enable: true
-    force-dns-mapping: true
-    parse-pure-ip: true
-    sniffing:
-      - tls
-      - http
-    override-destination: true
-
-  dns:
-    enable: true
-    listen: "0.0.0.0:1053"
-    ipv6: false
-    enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
-    nameserver:
-      - 1.1.1.1
-      - 8.8.8.8
-    fallback:
-      - tls://1.1.1.1:853
-      - tls://8.8.8.8:853
-    fallback-filter:
-      geoip: true
-      geosite:
-        - category-porn
-        - openai
-    nameserver-policy:
-      "geosite:category-ru":
-        - 77.88.8.8
-        - 77.88.8.1
-
-  # Поддерживаются любые типы прокси mihomo: ss, vless, vmess, trojan и др.
-  # Пример для Shadowsocks:
+  # Настройка upstream-прокси для mihomo (пример Shadowsocks).
   proxies:
-    - name: "ss1"
+    - # Имя прокси, используется в proxy-groups/rules.
+      name: "upstream"
+      # Тип прокси (ss/vless/vmess/trojan/...).
       type: ss
+      # Адрес upstream сервера.
       server: ""
+      # Порт upstream сервера.
       port: 443
+      # Cipher Shadowsocks.
       cipher: chacha20-ietf-poly1305
+      # Пароль Shadowsocks.
       password: ""
+      # Включение UDP для Shadowsocks outbound.
       udp: false
-
-  # Пример для VLESS+Reality (mihomo outbound):
-  # proxies:
-  #   - name: "upstream"
-  #     type: vless
-  #     server: ""
-  #     port: 443
-  #     uuid: ""
-  #     network: tcp
-  #     tls: true
-  #     udp: true
-  #     flow: "xtls-rprx-vision"
-  #     servername: "ya.ru"
-  #     client-fingerprint: "chrome"
-  #     reality-opts:
-  #       public-key: ""
-  #       short-id: ""
-
-  proxy-groups:
-    - name: "Proxy"
-      type: select
-      proxies:
-        - ss1
-        - DIRECT
-
-  rule-providers:
-    refilter_domains:
-      type: http
-      behavior: domain
-      url: "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/domains_all.lst"
-      path: ./ruleset/refilter_domains.txt
-      interval: 86400
-      format: text
-    refilter_ips:
-      type: http
-      behavior: ipcidr
-      url: "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/ipsum.lst"
-      path: ./ruleset/refilter_ips.txt
-      interval: 86400
-      format: text
-
-  rules:
-    - RULE-SET,refilter_domains,Proxy
-    - RULE-SET,refilter_ips,Proxy
-    - GEOSITE,category-porn,Proxy
-    - GEOSITE,category-ai-!cn,Proxy
-    - GEOIP,CN,DIRECT
-    - GEOIP,RU,DIRECT
-    - MATCH,DIRECT
-
-  external-controller: "0.0.0.0:9010"
+  # API-секрет external-controller (для metacubexd), пусто = без авторизации.
   secret: ""

@@ -1,0 +1,290 @@
+# Системный базовый конфиг.
+# Загружается автоматически и объединяется с config/router.yaml.
+# Любое поле можно переопределить в пользовательском config/router.yaml.
+#
+# Полезные официальные источники:
+# - Xray config reference: https://xtls.github.io/config/
+# - Xray VLESS inbound: https://xtls.github.io/config/inbounds/vless.html
+# - Xray Reality: https://xtls.github.io/config/transport.html#realityobject
+# - mihomo config wiki: https://wiki.metacubex.one/config/
+# - Docker Compose spec: https://docs.docker.com/reference/compose-file/
+
+router:
+  # IP/домен роутера в вашей LAN для SSH-подключений.
+  host: "192.168.31.1"
+  # Порт SSH на роутере.
+  ssh_port: 22
+  # Пользователь SSH (обычно root для Xiaomi/OpenWrt).
+  ssh_user: "root"
+
+usb:
+  # Явная точка монтирования USB на роутере (если пусто, определяется автоматически).
+  mount_path: ""
+
+stack:
+  # Каталог стека на USB: $USB/<relative_dir>.
+  relative_dir: "stack"
+  # Подкаталог бэкапов внутри USB: $USB/<backups_relative_dir>.
+  backups_relative_dir: "backups"
+
+startup:
+  # Базовый каталог автозапуска в прошивке роутера.
+  base_dir: "/data/startup"
+  # Подкаталог с autorun-скриптами.
+  autoruns_subdir: "autoruns"
+
+docker:
+  # Зеркала Docker Hub (docker.io), применяются через UCI mi_docker.
+  # Документация registry mirrors: https://docs.docker.com/docker-hub/image-library/mirror/
+  registry_mirrors:
+    - "https://cr.yandex"
+    - "https://dh-mirror.gitverse.ru"
+
+services:
+  xray_server:
+    # Включить/выключить сервис xray-server в compose.
+    enabled: true
+    # container_name для compose-сервиса xray.
+    container_name: "xray-server"
+    # Образ контейнера xray-server.
+    image: "ghcr.io/xtls/xray-core:25.1.30"
+  mihomo:
+    # Включить/выключить сервис mihomo.
+    enabled: true
+    # container_name для compose-сервиса mihomo.
+    container_name: "mihomo"
+    # Образ контейнера mihomo.
+    image: "docker.io/metacubex/mihomo:latest"
+    # mixed-port в итоговом mihomo-config (локальный mixed proxy порт).
+    mixed_port: 7890
+    # redir-port в итоговом mihomo-config (transparent proxy порт).
+    redir_port: 7891
+  torrserver:
+    # Включить/выключить TorrServer.
+    enabled: true
+    # container_name для TorrServer.
+    container_name: "torrserver"
+    # Образ TorrServer.
+    image: "docker.io/yourok/torrserver:latest"
+    # Порт TorrServer на роутере (host network).
+    port: 8090
+  metacubexd:
+    # Включить/выключить dashboard metacubexd.
+    enabled: true
+    # container_name для metacubexd.
+    container_name: "metacubexd"
+    # Образ web-dashboard metacubexd.
+    image: "gzxhwq/metacubexd:latest"
+    # Внешний порт dashboard на роутере.
+    port: 9099
+  # Пользовательские compose-сервисы (имя -> тело сервиса по Docker Compose spec).
+  # Эти сервисы будут добавлены в общий docker-compose.yml как есть.
+  # Smoke проверяет только встроенные сервисы проекта.
+  # Документация формата сервиса:
+  # https://docs.docker.com/reference/compose-file/services/
+  custom: {}
+
+xray:
+  # Уровень логирования Xray.
+  # Документация: https://xtls.github.io/config/log.html
+  log_level: "warning"
+  inbound:
+    # Произвольный tag inbound (используется в route-правилах Xray).
+    tag: "vless-reality-in"
+    # Адрес прослушивания входящих подключений.
+    listen: "0.0.0.0"
+    # Порт VLESS+Reality inbound.
+    port: 443
+    # Протокол inbound.
+    protocol: "vless"
+  # Список клиентов VLESS inbound.
+  # Документация клиентов VLESS: https://xtls.github.io/config/inbounds/vless.html#clientobject
+  clients:
+    - # UUID клиента.
+      id: "00000000-0000-0000-0000-000000000000"
+      # Flow клиента (для Reality обычно xtls-rprx-vision).
+      flow: "xtls-rprx-vision"
+  reality:
+    # Сервер-маскировка (target) для Reality.
+    dest: "ya.ru:443"
+    # Версия протокола Reality (обычно 0).
+    xver: 0
+    # Допустимые SNI для Reality-клиентов.
+    server_names:
+      - "ya.ru"
+      - "vk.com"
+    # Приватный ключ Reality (x25519), сгенерируйте через `xray x25519`.
+    private_key: "REPLACE_WITH_REALITY_PRIVATE_KEY"
+    # Список short_id (hex), используемых клиентами.
+    short_ids:
+      - "0123456789abcdef"
+    # uTLS fingerprint клиента (chrome/firefox/safari и т.д.).
+    fingerprint: "chrome"
+  routing:
+    # Локальный SOCKS upstream host для outbound в Xray.
+    socks_upstream_host: "127.0.0.1"
+    # Локальный SOCKS upstream port для outbound в Xray.
+    socks_upstream_port: 7890
+
+public_endpoint:
+  # Публичный IP/домен для генерации vless-ссылки (`vless-link`).
+  host: ""
+
+routing:
+  # Применять ли iptables-правила прозрачного прокси для LAN.
+  apply_iptables: false
+  # CIDR вашей домашней сети (используется при генерации iptables-правил).
+  lan_cidr: "192.168.31.0/24"
+  # Список IP, которые нужно исключить из transparent proxy.
+  excluded_ips: []
+
+# Ключи здесь соответствуют нативному формату mihomo.
+# Документация: https://wiki.metacubex.one/config/
+mihomo:
+  # Режим работы маршрутизации (rule/global/direct/script).
+  mode: rule
+  # Уровень логирования mihomo.
+  log-level: info
+
+  tun:
+    # Включение TUN-режима mihomo.
+    enable: false
+    # Тип сетевого стека TUN.
+    stack: system
+
+  sniffer:
+    # Включение sniffer (L7-определение доменов).
+    enable: true
+    # Форсировать DNS mapping для sniffed-сессий.
+    force-dns-mapping: true
+    # Разбор pure IP подключений.
+    parse-pure-ip: true
+    sniffing:
+      # Включить sniffing для TLS.
+      - tls
+      # Включить sniffing для HTTP.
+      - http
+    # Подменять destination на sniffed-домен.
+    override-destination: true
+
+  dns:
+    # Включить DNS-подсистему mihomo.
+    enable: true
+    # Адрес и порт DNS-сервера mihomo.
+    listen: "0.0.0.0:1053"
+    # Разрешать IPv6 DNS-ответы.
+    ipv6: false
+    # Режим DNS (fake-ip/redir-host).
+    enhanced-mode: fake-ip
+    # Диапазон fake-ip.
+    fake-ip-range: 198.18.0.1/16
+    nameserver:
+      # Основной DNS резолвер.
+      - 1.1.1.1
+      # Резервный DNS резолвер.
+      - 8.8.8.8
+    fallback:
+      # Fallback DNS over TLS.
+      - tls://1.1.1.1:853
+      # Fallback DNS over TLS.
+      - tls://8.8.8.8:853
+    fallback-filter:
+      # Включить geoip-фильтрацию fallback.
+      geoip: true
+      geosite:
+        # geosite-тег для fallback-маршрутизации.
+        - category-porn
+        # geosite-тег для fallback-маршрутизации.
+        - openai
+    nameserver-policy:
+      # Политика DNS для geosite:category-ru.
+      "geosite:category-ru":
+        - 77.88.8.8
+        - 77.88.8.1
+
+  proxies:
+    - # Имя outbound-прокси, используется в proxy-groups/rules.
+      name: "upstream"
+      # Тип прокси (ss/vless/vmess/trojan/...).
+      type: ss
+      # Адрес upstream сервера.
+      server: ""
+
+  # Пример для Shadowsocks:
+  #   - name: "upstream"
+  #     type: ss
+  #     server: ""
+  #     port: 443
+  #     cipher: chacha20-ietf-poly1305
+  #     password: ""
+  #     udp: false
+
+  # Пример для VLESS+Reality (mihomo outbound):
+  #   - name: "upstream"
+  #     type: vless
+  #     server: ""
+  #     port: 443
+  #     uuid: ""
+  #     network: tcp
+  #     tls: true
+  #     udp: true
+  #     flow: "xtls-rprx-vision"
+  #     servername: "ya.ru"
+  #     client-fingerprint: "chrome"
+  #     reality-opts:
+  #       public-key: ""
+  #       short-id: ""
+
+  proxy-groups:
+    - # Имя группы прокси для rule-таргетов.
+      name: "Proxy"
+      # Тип группы (select/url-test/fallback/load-balance/...).
+      type: select
+      proxies:
+        # Основной upstream из списка mihomo.proxies.
+        - upstream
+        # Прямой выход в интернет без прокси.
+        - DIRECT
+
+  rule-providers:
+    refilter_domains:
+      # Тип rule-provider.
+      type: http
+      # Тип правил в провайдере (domain/ipcidr/classical).
+      behavior: domain
+      # URL источника правил.
+      url: "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/domains_all.lst"
+      # Локальный путь кеша правил в контейнере.
+      path: ./ruleset/refilter_domains.txt
+      # Интервал обновления (секунды).
+      interval: 86400
+      # Формат файла rule-provider.
+      format: text
+    refilter_ips:
+      type: http
+      behavior: ipcidr
+      url: "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/ipsum.lst"
+      path: ./ruleset/refilter_ips.txt
+      interval: 86400
+      format: text
+
+  rules:
+    # Применять доменные правила re:filter через группу Proxy.
+    - RULE-SET,refilter_domains,Proxy
+    # Применять IP-правила re:filter через группу Proxy.
+    - RULE-SET,refilter_ips,Proxy
+    # Проксировать geosite category-porn.
+    - GEOSITE,category-porn,Proxy
+    # Проксировать geosite category-ai-!cn.
+    - GEOSITE,category-ai-!cn,Proxy
+    # Трафик в CN направлять напрямую.
+    - GEOIP,CN,DIRECT
+    # Трафик в RU направлять напрямую.
+    - GEOIP,RU,DIRECT
+    # Все остальное напрямую (измените при необходимости).
+    - MATCH,DIRECT
+
+  # Адрес external-controller для dashboard/API mihomo.
+  external-controller: "0.0.0.0:9010"
+  # Секрет external-controller API (пусто = без авторизации).
+  secret: ""

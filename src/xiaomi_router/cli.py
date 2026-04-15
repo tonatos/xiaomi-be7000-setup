@@ -223,7 +223,8 @@ def cmd_bootstrap_ssh(
                 typer.echo(
                     typer.style(
                         "Порт 22 открыт, но пароль не подошёл. "
-                        "Исправьте secrets / ROUTER_SSH_PASSWORD или используйте --force.",
+                        "Исправьте router.ssh_password / ROUTER_SSH_PASSWORD "
+                        "или используйте --force.",
                         fg=typer.colors.RED,
                     ),
                     err=True,

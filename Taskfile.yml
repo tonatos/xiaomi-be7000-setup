@@ -40,7 +40,7 @@ tasks:
       - "{{.PY}} -m xiaomi_router sync-pull"
 
   sync-push:
-    desc: Залить build/rendered и docker compose up
+    desc: Залить build/rendered и запустить docker compose up
     cmds:
       - "{{.PY}} -m xiaomi_router sync-push"
 

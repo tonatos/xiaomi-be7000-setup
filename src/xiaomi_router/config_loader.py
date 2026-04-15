@@ -30,7 +30,10 @@ def load_merged_config(
     main_path: Path,
     secrets_path: Path | None = None,
 ) -> dict[str, Any]:
-    cfg = load_yaml(main_path)
+    base_path = main_path.parent / "router.base.yaml"
+    base_cfg = load_yaml(base_path) if base_path.exists() else {}
+    user_cfg = load_yaml(main_path)
+    cfg = _deep_merge(base_cfg, user_cfg)
     sec_path = secrets_path
     if sec_path is None:
         cand = main_path.parent / "router.secrets.yaml"
@@ -63,8 +66,9 @@ def require_router_password(cfg: dict[str, Any]) -> str:
     pwd = cfg.get("router", {}).get("ssh_password")
     if not pwd:
         msg = (
-            "Задайте пароль SSH: config/router.secrets.yaml (ssh_password) "
-            "или переменную окружения ROUTER_SSH_PASSWORD"
+            "Задайте пароль SSH: router.ssh_password в config/router.yaml "
+            "(или legacy config/router.secrets.yaml), "
+            "либо переменную окружения ROUTER_SSH_PASSWORD"
         )
         raise SystemExit(msg)
     return str(pwd)

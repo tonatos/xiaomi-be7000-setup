@@ -40,3 +40,9 @@ services:
     environment:
       - DEFAULT_BACKEND_URL={{ services_metacubexd_default_backend_url }}
 {% endif %}
+{% set custom = services.custom | default({}) %}
+{% for service_name, service_cfg in custom.items() %}
+
+  {{ service_name }}:
+{{ service_cfg | toyaml | indent(4, first=True) }}
+{% endfor %}

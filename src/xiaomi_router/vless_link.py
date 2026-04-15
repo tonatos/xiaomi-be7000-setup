@@ -41,26 +41,35 @@ def build_vless_reality_link(
 
     inbound = x.get("inbound", {})
     port = int(inbound.get("port", 443))
-    uuid = x.get("vless_uuid")
+    clients = x.get("clients") or []
+    first_client = clients[0] if isinstance(clients, list) and clients else {}
+    uuid = x.get("vless_uuid") or first_client.get("id")
     if not uuid:
-        raise SystemExit("Нет xray.vless_uuid (secrets)")
+        raise SystemExit("Нет xray.clients[0].id (или legacy xray.vless_uuid) в router.yaml")
 
     reality = x.get("reality", {})
     sni = str(reality.get("server_names", ["ya.ru"])[0])
     fp = str(reality.get("fingerprint", "chrome"))
-    priv = x.get("reality_private_key")
+    priv = x.get("reality_private_key") or reality.get("private_key")
     if not priv:
-        raise SystemExit("Нет xray.reality_private_key (secrets)")
+        raise SystemExit(
+            "Нет xray.reality.private_key (или legacy xray.reality_private_key) в router.yaml"
+        )
     try:
         pbk = reality_public_key_b64url(str(priv))
     except ValueError as e:
-        raise SystemExit(f"Некорректный xray.reality_private_key: {e}") from e
-    short_ids = x.get("short_ids") or ["0123456789abcdef"]
+        raise SystemExit(
+            "Некорректный ключ Reality "
+            "(xray.reality.private_key / xray.reality_private_key): "
+            f"{e}"
+        ) from e
+    short_ids = x.get("short_ids") or reality.get("short_ids") or ["0123456789abcdef"]
     sid = str(short_ids[0]) if short_ids else ""
+    flow = str(first_client.get("flow") or "xtls-rprx-vision")
 
     params = {
         "encryption": "none",
-        "flow": "xtls-rprx-vision",
+        "flow": flow,
         "security": "reality",
         "sni": sni,
         "fp": fp,

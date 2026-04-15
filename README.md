@@ -1,14 +1,40 @@
 # xiaomi-be7000-setup
 
-IaC-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose на USB, **Xray (VLESS+Reality)**, **mihomo**, **TorrServer**, автозапуск через UCI `firewall` include, бэкап/откат и smoke-проверки. Что умеет:
-- устанавливает селективный Shadowsocks Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего Shadowsocks-сервера (для развертывания сервера можно использовать https://getoutline.org/ru/)
+IaC-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose на USB, **Xray (VLESS+Reality)**, **mihomo**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
+
+- устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
 - [Mihomo Dashboard, The Official One, XD](https://github.com/MetaCubeX/metacubexd) — для мониторинга вашего Mihomo-клиента
 - устанавливает Xray-сервер для того, чтобы вы могли подключаться к своему роутеру из внешней сети (например, со своего смартфона), используя роутер, как шлюз для Shadowsocks-прокси с маршрутизацией трафика
-- вишенка: устанавливает [TorrServer](https://github.com/yourok/torrserver) для просмотра торрентов, например, со SmartTV
+- бонусом: устанавливает [TorrServer](https://github.com/yourok/torrserver) для просмотра торрентов в домашней сети в реальном времени, например, со SmartTV
 
-В итоге, ваш роутер сможет маршрутизировать трафик в домашней сети, обходя блокировки "с обоих сторон" (в том числе, сервисов, которые заблокировали доступ для российских пользователей) через Shadowsocks и проксируя напрямую весь отечественный трафик (банки, госсервесы). Помимо этого, если у вас есть белый IP, вы можете настроить роутер как Vless-сервер для подключения своих смартфонов, чтобы использовать настроенные правила маршрутизации без необходимости выключать proxy-клиент при использовании отечественных сервисов.
+В итоге, ваш роутер сможет маршрутизировать трафик в домашней сети, обходя ограничения "с обоих сторон" (в том числе, сервисов, которые заблокировали доступ для российских пользователей) через Shadowsocks и проксируя напрямую весь отечественный трафик (банки, госсервисы). 
+
+Помимо этого, если у вас есть белый IP, вы можете настроить роутер как vless-сервер для подключения своих смартфонов, чтобы использовать настроенные правила маршрутизации без необходимости выключать proxy-клиент при использовании отечественных сервисов.
 
 В качестве зависимости, конфигуратор использует [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (эксплойт/доступ к устройству и постоянный dropbear) для получения ssh-доступа к роутере.
+
+## Архитектура
+
+```mermaid
+flowchart TD
+  UserClient["Клиенты (смартфон/ноутбук)\nVLESS-клиенты"] -->|"VLESS + Reality"| Xray
+  LanDevices["Устройства в LAN\n(ТВ/Xbox/ПК)"] -->|"LAN-трафик"| Mihomo
+  SmartTV["Smart TV"] -->|"Стриминг торрентов"| Torr
+
+  subgraph Router["Xiaomi BE7000 (Docker stack на USB)"]
+    Xray["Xray server\n(vless inbound)"]
+    Mihomo["mihomo\n(маршрутизация/правила)"]
+    Dashboard["metacubexd\n(dashboard)"]
+    Torr["TorrServer"]
+    Xray --> Mihomo
+    Dashboard -. API .-> Mihomo
+  end
+
+  Mihomo -->|"Proxy route"| Upstream["Зарубежный upstream proxy\n(Shadowsocks/VLESS)"]
+  Mihomo -->|"DIRECT route\n(RU/LAN/исключения)"| Direct["Прямой выход в интернет"]
+```
+
+
 
 ## Требования
 
@@ -20,7 +46,7 @@ IaC-ориентированный конфигуратор для Xiaomi BE7000
 ## Быстрый старт
 
 ```bash
-git clone --recurse-submodules <url> xiaomi-be7000-setup
+git clone --recurse-submodules git@github.com:tonatos/xiaomi-be7000-setup.git xiaomi-be7000-setup
 cd xiaomi-be7000-setup
 poetry install
 ```
@@ -29,9 +55,15 @@ poetry install
 
 ```bash
 cp config/router.example.yaml config/router.yaml
-cp config/router.secrets.example.yaml config/router.secrets.yaml
-# Отредактируйте оба файла: host, пароль SSH, UUID, Reality-ключи, upstream для mihomo
+# Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи, upstream для mihomo
 ```
+
+`config/router.base.yaml` подгружается автоматически, а `config/router.yaml` переопределяет любые его поля.
+
+Для добавления собственных контейнеров используйте `services.custom` в `router.yaml`:
+каждый элемент этой секции вставляется в общий `docker-compose.yml` как обычный
+`services.<name>` из Docker Compose. Smoke-проверки по умолчанию выполняются только
+для встроенных сервисов проекта.
 
 Переменные окружения (перекрывают YAML): `ROUTER_HOST`, `ROUTER_SSH_PASSWORD`, `ROUTER_SSH_PORT`, `ROUTER_SSH_USER`, `ROUTER_PUBLIC_HOST`.
 
@@ -70,16 +102,18 @@ poetry run xiaomi-router deploy
 
 ### Полезные команды
 
-| Task / CLI | Назначение |
-|------------|------------|
-| `task render` | Локальный рендер в `build/rendered` (USB-заглушка) |
-| `task render-live` | Рендер с определением USB по SSH |
-| `task smoke` | Проверки портов и `docker compose` на роутере |
-| `task sync-pull` | Скачать конфиги со стека в `build/synced-from-router` |
-| `task sync-push` | Залить `build/rendered` и `docker compose up -d` |
-| `task vless-link` | Напечатать VLESS (Reality) ссылку для клиента |
-| `task rollback -- path/to/deploy-....json` | Откат по метаданным (JSON с роутера) |
-| `task diagnose` | Сводка по mi_docker / USB |
+
+| Task / CLI                                 | Назначение                                            |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `task render`                              | Локальный рендер в `build/rendered` (USB-заглушка)    |
+| `task render-live`                         | Рендер с определением USB по SSH                      |
+| `task smoke`                               | Проверки портов и `docker compose` на роутере         |
+| `task sync-pull`                           | Скачать конфиги со стека в `build/synced-from-router` |
+| `task sync-push`                           | Залить `build/rendered` и `docker compose up -d`      |
+| `task vless-link`                          | Напечатать VLESS (Reality) ссылку для клиента         |
+| `task rollback -- path/to/deploy-....json` | Откат по метаданным (JSON с роутера)                  |
+| `task diagnose`                            | Сводка по mi_docker / USB                             |
+
 
 Пример отката (JSON лежит на роутере в `$USB/backups/`):
 
@@ -91,8 +125,8 @@ poetry run xiaomi-router rollback ./deploy-....json
 ## Структура репозитория
 
 - `config/router.example.yaml` — основной пример (в git)
+- `config/router.base.yaml` — базовые системные значения (в git)
 - `config/router.yaml` — ваш файл (в `.gitignore`)
-- `config/router.secrets.yaml` — секреты (в `.gitignore`)
 - `templates/` — Jinja2-шаблоны: xray, mihomo, compose, autorun-скрипты
 - `src/xiaomi_router/` — Python CLI
 - `third_party/xmir-patcher` — submodule
