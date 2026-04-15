@@ -16,7 +16,7 @@ from xiaomi_router.pipeline import (
 )
 from xiaomi_router.render import render_all, render_local_preview
 from xiaomi_router.setup_extra import (
-    setup_compose_and_optional_v2ray,
+    setup_compose,
     setup_entware,
     setup_opkg_usb,
 )
@@ -90,16 +90,22 @@ def cmd_render(
 def cmd_deploy(
     skip_smoke: bool = typer.Option(False, "--skip-smoke"),
     skip_backup: bool = typer.Option(False, "--skip-backup"),
+    no_rollback_on_smoke_fail: bool = typer.Option(
+        False,
+        "--no-rollback-on-smoke-fail",
+        help="Не откатывать изменения при провале smoke",
+    ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),
 ) -> None:
-    """Бэкап, рендер, загрузка, UCI, docker compose up, smoke (и откат при сбое)."""
+    """Бэкап, рендер, загрузка, UCI, docker compose up, smoke."""
     cfg = _load(config, secrets)
     try:
         meta = deploy(
             cfg,
             skip_smoke=skip_smoke,
             skip_backup=skip_backup,
+            rollback_on_smoke_fail=not no_rollback_on_smoke_fail,
             log=typer.echo,
         )
         typer.echo(typer.style("✓ Deploy OK.", fg=typer.colors.GREEN))
@@ -270,7 +276,6 @@ def cmd_setup_entware(
 
 @app.command("setup-compose")
 def cmd_setup_compose(
-    v2ray: bool = typer.Option(False, "--with-v2ray", help="Также залить нативный v2ray на USB"),
     write_profile: bool = typer.Option(
         False,
         "--write-profile",
@@ -280,9 +285,7 @@ def cmd_setup_compose(
     secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),
 ) -> None:
     cfg = _load(config, secrets)
-    setup_compose_and_optional_v2ray(
-        cfg, compose=True, v2ray=v2ray, write_profile=write_profile
-    )
+    setup_compose(cfg, write_profile=write_profile)
 
 
 def main() -> None:

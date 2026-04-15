@@ -10,6 +10,7 @@ from xiaomi_router.backup import create_backup, rollback
 from xiaomi_router.config_loader import require_router_password
 from xiaomi_router.paths import rendered_dir
 from xiaomi_router.render import render_all
+from xiaomi_router.setup_extra import ensure_compose_with_optional_entware
 from xiaomi_router.smoke import run_smoke
 from xiaomi_router.ssh_util import RouterSSH
 
@@ -114,6 +115,7 @@ def deploy(
     *,
     skip_smoke: bool = False,
     skip_backup: bool = False,
+    rollback_on_smoke_fail: bool = True,
     log: Callable[[str], None] = _Noop,
 ) -> dict[str, Any] | None:
     router = cfg["router"]
@@ -166,6 +168,7 @@ def deploy(
         log("[5/6] Применение UCI firewall и перезапуск docker...")
         apply_uci_firewall_and_docker_fix(ssh, cfg)
         apply_docker_registry_mirrors(ssh, cfg, log=log)
+        ensure_compose_with_optional_entware(ssh, usb, log=log)
 
         env = _remote_compose_env(usb)
         code = ssh.exec_streaming(
@@ -190,10 +193,15 @@ def deploy(
             for msg in res.messages:
                 log(f"      {msg}")
             if not res.ok:
-                log("      Smoke не прошёл — откат...")
-                ssh.exec_text(f"{env}; cd '{stack}' && docker compose down 2>/dev/null || true")
-                if meta:
-                    rollback(ssh, meta)
+                if rollback_on_smoke_fail:
+                    log("      Smoke не прошёл — откат...")
+                    ssh.exec_text(
+                        f"{env}; cd '{stack}' && docker compose down 2>/dev/null || true"
+                    )
+                    if meta:
+                        rollback(ssh, meta)
+                else:
+                    log("      Smoke не прошёл — откат отключён, оставляю текущий state.")
                 raise RuntimeError("Smoke failed:\n" + "\n".join(res.messages))
             log("      Smoke OK.")
         else:
@@ -255,6 +263,7 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         ssh.upload_file(out / "configs/mihomo/config.yaml", f"{stack}/configs/mihomo/config.yaml")
         ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
         ssh.upload_file(out / "mihomo/rollback.sh", f"{stack}/mihomo/rollback.sh", mode=0o755)
+        ensure_compose_with_optional_entware(ssh, usb)
         env = _remote_compose_env(usb)
         ssh.exec_text(f"{env}; cd '{stack}' && docker compose up -d 2>&1")
     finally:

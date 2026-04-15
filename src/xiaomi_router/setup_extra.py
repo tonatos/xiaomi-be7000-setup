@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import io
-import posixpath
-import ssl
-import urllib.request
-import zipfile
+from collections.abc import Callable
 from typing import Any, Final
 
 from xiaomi_router.config_loader import require_router_password
 from xiaomi_router.ssh_util import RouterSSH
 
 COMPOSE_VERSION: Final = "v5.1.1"
-V2RAY_VERSION: Final = "v5.47.0"
 ENTWARE_INSTALLER_URL: Final = "http://bin.entware.net/aarch64-k3.10/installer/generic.sh"
+_Noop: Callable[[str], None] = lambda _: None
 
 
 def _ssh_from_cfg(cfg: dict[str, Any]) -> RouterSSH:
@@ -23,6 +19,182 @@ def _ssh_from_cfg(cfg: dict[str, Any]) -> RouterSSH:
         port=int(router.get("ssh_port", 22)),
         username=str(router.get("ssh_user", "root")),
     )
+
+
+def _remote_compose_env(usb: str) -> str:
+    return (
+        f"export PATH='{usb}/mi_docker/docker-binaries:'\"$PATH\"; "
+        f"if [ -f '{usb}/opt/usb-env.sh' ]; then . '{usb}/opt/usb-env.sh'; fi; "
+        f"if [ -f '{usb}/opt/docker-cli/compose-env.sh' ]; then "
+        f". '{usb}/opt/docker-cli/compose-env.sh'; fi"
+    )
+
+
+def _raise_if_failed(code: int, out: str, err: str, *, step: str) -> None:
+    if code == 0:
+        return
+    details = out.strip()
+    if err.strip():
+        details = f"{details}\n[stderr]\n{err.strip()}".strip()
+    raise RuntimeError(f"{step} завершился с ошибкой (exit={code}).\n{details}")
+
+
+def has_docker_compose(ssh: RouterSSH, usb: str) -> bool:
+    code, _, _ = ssh.exec(
+        f"{_remote_compose_env(usb)}; docker compose version >/dev/null 2>&1",
+        timeout=30,
+    )
+    return code == 0
+
+
+def install_entware_on_usb(
+    ssh: RouterSSH,
+    usb: str,
+    *,
+    log: Callable[[str], None] = _Noop,
+) -> None:
+    usb_entware_root = f"{usb}/entware-opt"
+    script = f"""#!/bin/sh
+set -e
+USB_ENTWARE_ROOT='{usb_entware_root}'
+INSTALLER_URL='{ENTWARE_INSTALLER_URL}'
+
+mkdir -p "$USB_ENTWARE_ROOT"
+if [ -d /opt/filetunnel ] && [ ! -d "$USB_ENTWARE_ROOT/filetunnel" ]; then
+  cp -a /opt/filetunnel "$USB_ENTWARE_ROOT/" 2>/dev/null || true
+fi
+
+if mount | grep -q ' /opt '; then
+  echo 'Already mounted /opt'
+else
+  mount --bind "$USB_ENTWARE_ROOT" /opt
+fi
+
+if [ -x /opt/bin/opkg ]; then
+  echo 'Entware already installed'
+else
+  tmp=/tmp/entware-generic.sh
+  if command -v curl >/dev/null 2>&1; then
+    curl -fSL "$INSTALLER_URL" -o "$tmp"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$tmp" "$INSTALLER_URL"
+  else
+    echo 'ERROR: neither curl nor wget is available for Entware installer'
+    exit 42
+  fi
+  sh "$tmp"
+  rm -f "$tmp"
+fi
+
+/opt/bin/opkg update 2>&1 | head -40 || true
+"""
+    log("      Устанавливаю Entware на USB (при необходимости)...")
+    code, out, err = ssh.exec(script, timeout=300)
+    _raise_if_failed(code, out, err, step="setup-entware")
+    for line in out.strip().splitlines():
+        log(f"      {line}")
+
+
+def install_compose_plugin(
+    ssh: RouterSSH,
+    usb: str,
+    *,
+    write_profile: bool = False,
+    log: Callable[[str], None] = _Noop,
+) -> None:
+    compose_usb_hook = (
+        f"if [ -f '{usb}/opt/docker-cli/compose-env.sh' ]; then "
+        f". '{usb}/opt/docker-cli/compose-env.sh'; fi"
+    )
+    script = rf"""#!/bin/sh
+set -e
+USB='{usb}'
+OPT="$USB/opt"
+DOCKER_BIN="$USB/mi_docker/docker-binaries"
+
+if [ ! -x "$DOCKER_BIN/docker" ]; then
+  echo "ERROR: docker binary not found at $DOCKER_BIN/docker"
+  exit 41
+fi
+
+mkdir -p "$OPT"
+U=$(uname -m)
+case "$U" in
+  aarch64) COMPOSE_ASSET=docker-compose-linux-aarch64 ;;
+  armv7l) COMPOSE_ASSET=docker-compose-linux-armv7 ;;
+  armv6l) COMPOSE_ASSET=docker-compose-linux-armv6 ;;
+  *) echo "ERROR arch $U"; exit 1 ;;
+esac
+
+DOCKER_CONFIG="$OPT/docker-cli"
+TARGET="$DOCKER_CONFIG/cli-plugins/docker-compose"
+mkdir -p "$DOCKER_CONFIG/cli-plugins"
+URL="https://github.com/docker/compose/releases/download/{COMPOSE_VERSION}/$COMPOSE_ASSET"
+
+if command -v curl >/dev/null 2>&1; then
+  curl -fSL "$URL" -o "$TARGET"
+elif command -v wget >/dev/null 2>&1; then
+  wget -O "$TARGET" "$URL"
+else
+  echo "ERROR: neither curl nor wget is available"
+  exit 42
+fi
+
+chmod +x "$TARGET"
+
+ENV_SH="$DOCKER_CONFIG/compose-env.sh"
+cat > "$ENV_SH" << ENVEOF
+export DOCKER_CONFIG="$DOCKER_CONFIG"
+export PATH="$DOCKER_BIN:\$PATH"
+ENVEOF
+chmod +x "$ENV_SH"
+
+USB_ENV="$OPT/usb-env.sh"
+if [ -f "$USB_ENV" ] && ! grep -qF "compose-env.sh" "$USB_ENV" 2>/dev/null; then
+  echo "" >> "$USB_ENV"
+  echo "{compose_usb_hook}" >> "$USB_ENV"
+fi
+
+. "$ENV_SH"
+docker compose version
+"""
+    log("      Устанавливаю docker compose plugin на USB...")
+    code, out, err = ssh.exec(script, timeout=300)
+    _raise_if_failed(code, out, err, step="setup-compose")
+    for line in out.strip().splitlines():
+        log(f"      {line}")
+
+    if write_profile:
+        env_sh = f"{usb}/opt/docker-cli/compose-env.sh"
+        code, out, err = ssh.exec(
+            f"grep -qF 'docker-cli/compose-env.sh' /etc/profile 2>/dev/null || "
+            f"echo \". '{env_sh}'\" >> /etc/profile"
+        )
+        _raise_if_failed(code, out, err, step="write /etc/profile compose env")
+
+
+def ensure_compose_with_optional_entware(
+    ssh: RouterSSH,
+    usb: str,
+    *,
+    log: Callable[[str], None] = _Noop,
+) -> None:
+    if has_docker_compose(ssh, usb):
+        log("      docker compose уже доступен.")
+        return
+
+    log("      docker compose не найден — запускаю auto-setup.")
+    try:
+        install_compose_plugin(ssh, usb, log=log)
+    except RuntimeError:
+        log("      setup-compose не удался, пробую setup-entware и повтор.")
+        install_entware_on_usb(ssh, usb, log=log)
+        install_compose_plugin(ssh, usb, log=log)
+
+    if not has_docker_compose(ssh, usb):
+        raise RuntimeError(
+            "docker compose по-прежнему недоступен после setup-compose/setup-entware"
+        )
 
 
 def setup_opkg_usb(cfg: dict[str, Any]) -> None:
@@ -110,136 +282,19 @@ def setup_entware(cfg: dict[str, Any]) -> None:
     ssh = _ssh_from_cfg(cfg)
     try:
         usb = ssh.usb_mount_from_router(cfg.get("usb", {}).get("mount_path"))
-        usb_opt = f"{usb}/opt"
-        usb_entware_root = f"{usb}/entware-opt"
-        usb_env = f"{usb_opt}/usb-env.sh"
-        runner = "/tmp/entware-setup.sh"
-        script = f"""#!/bin/sh
-set -e
-USB_ENTWARE_ROOT='{usb_entware_root}'
-USB_ENV='{usb_env}'
-INSTALLER_URL='{ENTWARE_INSTALLER_URL}'
-mkdir -p "$USB_ENTWARE_ROOT"
-if [ -d /opt/filetunnel ] && [ ! -d "$USB_ENTWARE_ROOT/filetunnel" ]; then
-  cp -a /opt/filetunnel "$USB_ENTWARE_ROOT/" 2>/dev/null || true
-fi
-if mount | grep -q ' /opt '; then
-  echo 'Already mounted /opt'
-else
-  mount --bind "$USB_ENTWARE_ROOT" /opt
-fi
-tmp=/tmp/entware-generic.sh
-curl -fSL "$INSTALLER_URL" -o "$tmp"
-sh "$tmp"
-rm -f "$tmp"
-/opt/bin/opkg update 2>&1 | head -40 || true
-"""
-        ssh.upload_bytes(runner, script.encode("utf-8"), mode=0o755)
-        print(ssh.exec_text(f"'{runner}' 2>&1"))
+        install_entware_on_usb(ssh, usb, log=print)
     finally:
         ssh.close()
 
 
-def _v2ray_zip_name(uname_m: str) -> str:
-    if uname_m == "aarch64":
-        return "v2ray-linux-arm64-v8a.zip"
-    if uname_m == "armv7l":
-        return "v2ray-linux-arm32-v7a.zip"
-    if uname_m == "armv6l":
-        return "v2ray-linux-arm32-v6.zip"
-    raise ValueError(f"Неподдерживаемая архитектура: {uname_m}")
-
-
-def _download_v2ray_zip(zip_name: str) -> bytes:
-    url = f"https://github.com/v2fly/v2ray-core/releases/download/{V2RAY_VERSION}/{zip_name}"
-    req = urllib.request.Request(url, headers={"User-Agent": "xiaomi-be7000-setup"})
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return resp.read()
-    except ssl.SSLError:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, context=ctx, timeout=120) as resp:
-            return resp.read()
-
-
-def setup_compose_and_optional_v2ray(
+def setup_compose(
     cfg: dict[str, Any],
     *,
-    compose: bool = True,
-    v2ray: bool = False,
     write_profile: bool = False,
 ) -> None:
     ssh = _ssh_from_cfg(cfg)
     try:
         usb = ssh.usb_mount_from_router(cfg.get("usb", {}).get("mount_path"))
-        _, uname, _ = ssh.exec("uname -m")
-        uname_m = uname.strip().splitlines()[-1]
-
-        if compose:
-            compose_usb_hook = (
-                f"if [ -f '{usb}/opt/docker-cli/compose-env.sh' ]; then "
-                f". '{usb}/opt/docker-cli/compose-env.sh'; fi"
-            )
-            remote = rf"""
-set -e
-UUID=$(uci -q get mi_docker.settings.device_uuid)
-STORAGE_DIR=$(storage dump | grep -C3 "$UUID" | grep target: | awk '{{print $2}}')
-OPT="$STORAGE_DIR/opt"
-mkdir -p "$OPT"
-U=$(uname -m)
-case "$U" in
-  aarch64) COMPOSE_ASSET=docker-compose-linux-aarch64 ;;
-  armv7l) COMPOSE_ASSET=docker-compose-linux-armv7 ;;
-  armv6l) COMPOSE_ASSET=docker-compose-linux-armv6 ;;
-  *) echo "ERROR arch $U"; exit 1 ;;
-esac
-DOCKER_CONFIG="$OPT/docker-cli"
-mkdir -p "$DOCKER_CONFIG/cli-plugins"
-URL="https://github.com/docker/compose/releases/download/{COMPOSE_VERSION}/$COMPOSE_ASSET"
-curl -fSL "$URL" -o "$DOCKER_CONFIG/cli-plugins/docker-compose"
-chmod +x "$DOCKER_CONFIG/cli-plugins/docker-compose"
-ENV_SH="$DOCKER_CONFIG/compose-env.sh"
-cat > "$ENV_SH" << ENVEOF
-export DOCKER_CONFIG="$DOCKER_CONFIG"
-export PATH="$STORAGE_DIR/mi_docker/docker-binaries:$PATH"
-ENVEOF
-chmod +x "$ENV_SH"
-USB_ENV="$OPT/usb-env.sh"
-if [ -f "$USB_ENV" ] && ! grep -qF "compose-env.sh" "$USB_ENV" 2>/dev/null; then
-  echo "" >> "$USB_ENV"
-  echo "{compose_usb_hook}" >> "$USB_ENV"
-fi
-. "$ENV_SH"
-docker compose version
-"""
-            print(ssh.exec_text(remote))
-            if write_profile:
-                env_sh = f"{usb}/opt/docker-cli/compose-env.sh"
-                ssh.exec_text(
-                    f"grep -qF 'docker-cli/compose-env.sh' /etc/profile 2>/dev/null || "
-                    f"echo \". '{env_sh}'\" >> /etc/profile"
-                )
-
-        if v2ray:
-            zip_name = _v2ray_zip_name(uname_m)
-            raw = _download_v2ray_zip(zip_name)
-            remote_dir = f"{usb}/opt/v2ray"
-            ssh.exec_text(f"mkdir -p '{remote_dir}'")
-            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                for info in zf.infolist():
-                    if info.is_dir():
-                        continue
-                    name = info.filename
-                    if name.startswith("/") or ".." in name.split("/"):
-                        continue
-                    remote_path = f"{remote_dir}/{name}"
-                    parent = posixpath.dirname(remote_path)
-                    if parent != remote_dir:
-                        ssh.exec_text(f"mkdir -p '{parent}'")
-                    ssh.upload_bytes(remote_path, zf.read(info))
-            ssh.exec_text(f"chmod +x '{remote_dir}/v2ray' 2>/dev/null || true")
-            print(ssh.exec_text(f"'{remote_dir}/v2ray' version"))
+        install_compose_plugin(ssh, usb, write_profile=write_profile, log=print)
     finally:
         ssh.close()
