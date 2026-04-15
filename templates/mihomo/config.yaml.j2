@@ -2,30 +2,47 @@
 mixed-port: {{ services.mihomo.mixed_port | default(7890) }}
 redir-port: {{ services.mihomo.redir_port | default(7891) }}
 allow-lan: true
-mode: rule
-log-level: info
+mode: {{ mihomo.mode | default('rule') }}
+log-level: {{ mihomo['log-level'] | default('info') }}
+{% if mihomo.tun is defined %}
+
+tun:
+{{ mihomo.tun | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo.sniffer is defined %}
+
+sniffer:
+{{ mihomo.sniffer | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo.dns is defined %}
+
+dns:
+{{ mihomo.dns | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo.proxies is defined %}
 
 proxies:
-  - name: {{ mihomo_proxy.name | default('upstream') }}
-    type: vless
-    server: {{ mihomo_proxy.server | tojson }}
-    port: {{ mihomo_proxy.port }}
-    uuid: {{ mihomo_proxy.uuid | tojson }}
-    network: tcp
-    tls: true
-    udp: true
-    flow: {{ mihomo_proxy.flow | default('xtls-rprx-vision') | tojson }}
-    servername: {{ mihomo_proxy.sni | tojson }}
-    client-fingerprint: {{ mihomo_proxy.fingerprint | default('chrome') | tojson }}
-    reality-opts:
-      public-key: {{ mihomo_proxy.public_key | tojson }}
-      short-id: {{ mihomo_proxy.short_id | tojson }}
+{{ mihomo.proxies | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo['proxy-groups'] is defined %}
 
 proxy-groups:
-  - name: default
-    type: select
-    proxies:
-      - {{ mihomo_proxy.name | default('upstream') }}
+{{ mihomo['proxy-groups'] | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo['rule-providers'] is defined %}
+
+rule-providers:
+{{ mihomo['rule-providers'] | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo.rules is defined %}
 
 rules:
-  - MATCH,default
+{{ mihomo.rules | toyaml | indent(2, first=True) }}
+{% endif %}
+{% if mihomo['external-controller'] is defined %}
+
+external-controller: {{ mihomo['external-controller'] }}
+{% endif %}
+{% if mihomo.secret is defined %}
+secret: {{ mihomo.secret | tojson }}
+{% endif %}

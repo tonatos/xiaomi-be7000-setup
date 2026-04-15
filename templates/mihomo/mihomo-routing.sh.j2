@@ -1,12 +1,23 @@
 #!/bin/sh
-# Правила прозрачной маршрутизации (пример). Проверьте интерфейсы и подсеть.
+# Правила прозрачной маршрутизации mihomo.
 # Включение: routing.apply_iptables в router.yaml
+#
+# ВАЖНО — исключённые IP (routing.excluded_ips):
+#   Устройства с прямым NAT (Xbox, PS, Nintendo и др.) не должны проходить
+#   через прозрачный прокси. Mihomo завершает TCP-соединение и открывает новое
+#   от имени роутера, из-за чего Xbox видит чужой порт и не может определить
+#   NAT-тип. Добавьте IP таких устройств в routing.excluded_ips (см. router.yaml).
 
 CHAIN="MIHOMO_{{ services.mihomo.container_name | default('mihomo') | upper | replace('-', '_') }}"
 
 _start() {
 {% if routing.apply_iptables | default(false) %}
     iptables -t nat -N "$CHAIN" 2>/dev/null || iptables -t nat -F "$CHAIN"
+    # Устройства с прямым NAT: обходят прокси полностью
+{% for ip in routing.excluded_ips | default([]) %}
+    iptables -t nat -A "$CHAIN" -s {{ ip }} -j RETURN
+{% endfor %}
+    # Частные и служебные диапазоны назначения: не проксируем
     iptables -t nat -A "$CHAIN" -d 0.0.0.0/8 -j RETURN
     iptables -t nat -A "$CHAIN" -d 10.0.0.0/8 -j RETURN
     iptables -t nat -A "$CHAIN" -d 127.0.0.0/8 -j RETURN

@@ -97,7 +97,7 @@ poetry run xiaomi-router rollback ./deploy-....json
 - `src/xiaomi_router/` — Python CLI
 - `third_party/xmir-patcher` — submodule
 
-На USB создаётся каталог `stack/` (имя задаётся в `stack.relative_dir`): `docker-compose.yml`, `configs/xray`, `configs/mihomo`, `mihomo/mihomo-routing.sh`.
+На USB создаётся каталог `stack/` (имя задаётся в `stack.relative_dir`): `docker-compose.yml`, `configs/xray`, `configs/mihomo`, `mihomo/mihomo-routing.sh`. По умолчанию туда же разворачивается `metacubexd` (веб-дашборд Mihomo) на порту `9099` роутера.
 
 ## VLESS и «белый» IP
 

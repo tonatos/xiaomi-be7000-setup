@@ -96,12 +96,17 @@ def cmd_deploy(
     """Бэкап, рендер, загрузка, UCI, docker compose up, smoke (и откат при сбое)."""
     cfg = _load(config, secrets)
     try:
-        meta = deploy(cfg, skip_smoke=skip_smoke, skip_backup=skip_backup)
-        typer.echo(typer.style("Deploy OK.", fg=typer.colors.GREEN))
+        meta = deploy(
+            cfg,
+            skip_smoke=skip_smoke,
+            skip_backup=skip_backup,
+            log=typer.echo,
+        )
+        typer.echo(typer.style("✓ Deploy OK.", fg=typer.colors.GREEN))
         if meta:
-            typer.echo(f"Бэкап: {meta.get('tar_startup')}")
+            typer.echo(f"  Бэкап: {meta.get('tar_startup')}")
     except Exception as e:
-        typer.echo(typer.style(str(e), fg=typer.colors.RED), err=True)
+        typer.echo(typer.style(f"✗ {e}", fg=typer.colors.RED), err=True)
         raise typer.Exit(1) from e
 
 
@@ -120,7 +125,7 @@ def cmd_smoke(
         username=str(r.get("ssh_user", "root")),
     )
     try:
-        res = run_smoke(ssh, cfg)
+        res = run_smoke(ssh, cfg, log=typer.echo)
         typer.echo("\n".join(res.messages))
         if not res.ok:
             raise typer.Exit(1)

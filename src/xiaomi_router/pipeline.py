@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from xiaomi_router.backup import create_backup, rollback
 from xiaomi_router.config_loader import require_router_password
@@ -9,6 +12,8 @@ from xiaomi_router.paths import rendered_dir
 from xiaomi_router.render import render_all
 from xiaomi_router.smoke import run_smoke
 from xiaomi_router.ssh_util import RouterSSH
+
+_Noop: Callable[[str], None] = lambda _: None
 
 
 def _stack_path(cfg: dict[str, Any], usb: str) -> str:
@@ -18,7 +23,11 @@ def _stack_path(cfg: dict[str, Any], usb: str) -> str:
 
 def _startup_paths(cfg: dict[str, Any]) -> tuple[str, str]:
     st = cfg.get("startup", {})
-    base = st.get("base_dir", "/data/startup")
+    base = str(st.get("base_dir", "/data/startup")).strip()
+    if not base.startswith("/"):
+        raise ValueError(
+            "startup.base_dir должен быть абсолютным путём (например '/data/startup')"
+        )
     sub = st.get("autoruns_subdir", "autoruns")
     return base, f"{base.rstrip('/')}/{sub}"
 
@@ -54,11 +63,58 @@ def apply_uci_firewall_and_docker_fix(ssh: RouterSSH, cfg: dict[str, Any]) -> No
     ssh.exec_text("/etc/init.d/mi_docker start 2>/dev/null || true")
 
 
+def apply_docker_registry_mirrors(
+    ssh: RouterSSH,
+    cfg: dict[str, Any],
+    log: Callable[[str], None] = _Noop,
+) -> None:
+    mirrors = cfg.get("docker", {}).get("registry_mirrors", [])
+    if not mirrors:
+        return
+
+    log("      Настройка registry_mirrors в /etc/config/mi_docker...")
+    validated: list[str] = []
+    for mirror in mirrors:
+        m = str(mirror).strip()
+        if not m:
+            continue
+        parsed = urlparse(m)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(f"Невалидный registry_mirror URL: {m}")
+        if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise ValueError(
+                "registry_mirror должен быть origin без path/query/fragment: "
+                f"{m}"
+            )
+        validated.append(m.rstrip("/"))
+
+    if not validated:
+        log("      registry_mirrors пустой после валидации — пропускаю.")
+        return
+
+    cmds = ["uci -q delete mi_docker.globals.registry_mirrors 2>/dev/null || true"]
+    for m in validated:
+        cmds.append(f"uci add_list mi_docker.globals.registry_mirrors='{m}'")
+    cmds.append("uci commit mi_docker")
+    ssh.exec_text("; ".join(cmds))
+
+    _, out, _ = ssh.exec("uci show mi_docker.globals | grep registry_mirrors || true")
+    if out.strip():
+        for line in out.strip().splitlines():
+            log(f"      {line}")
+
+    log("      Перезапуск mi_docker для применения зеркал...")
+    ssh.exec_text("/etc/init.d/mi_docker restart 2>/dev/null || true")
+    time.sleep(5)
+    log("      mi_docker перезапущен.")
+
+
 def deploy(
     cfg: dict[str, Any],
     *,
     skip_smoke: bool = False,
     skip_backup: bool = False,
+    log: Callable[[str], None] = _Noop,
 ) -> dict[str, Any] | None:
     router = cfg["router"]
     pwd = require_router_password(cfg)
@@ -70,53 +126,79 @@ def deploy(
     )
     meta: dict[str, Any] | None = None
     try:
+        log(f"[1/6] Подключение к {router['host']}...")
         usb = ssh.usb_mount_from_router(cfg.get("usb", {}).get("mount_path"))
+        log(f"      USB: {usb}")
         stack = _stack_path(cfg, usb)
         startup_base, _ = _startup_paths(cfg)
 
         if not skip_backup:
+            log("[2/6] Создание бэкапа...")
             meta = create_backup(ssh, cfg, usb_mount=usb, stack_path=stack, startup_base=startup_base)
+            log(f"      Бэкап: {meta['name']}")
+        else:
+            log("[2/6] Бэкап пропущен (--skip-backup).")
 
+        log("[3/6] Рендер шаблонов...")
         ssh.exec_text(f"mkdir -p '{startup_base}/autoruns'")
-
         out = render_all(cfg, usb)
+        log(f"      Артефакты: {out}")
+
+        log("[4/6] Загрузка файлов на роутер...")
         ssh.exec_text(f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo' '{stack}/mihomo'")
+        uploads = [
+            (out / "docker-compose.yml",                          f"{stack}/docker-compose.yml",                                   None),
+            (out / "configs/xray/config.json",                    f"{stack}/configs/xray/config.json",                             None),
+            (out / "configs/mihomo/config.yaml",                  f"{stack}/configs/mihomo/config.yaml",                           None),
+            (out / "mihomo/mihomo-routing.sh",                    f"{stack}/mihomo/mihomo-routing.sh",                             0o755),
+            (out / "mihomo/rollback.sh",                          f"{stack}/mihomo/rollback.sh",                                   0o755),
+            (out / "startup/startup.sh",                          f"{startup_base}/startup.sh",                                    0o755),
+            (out / "startup/autoruns/010-start-docker.sh",        f"{startup_base}/autoruns/010-start-docker.sh",                  0o755),
+            (out / "startup/autoruns/020-mihomo-routing.sh",      f"{startup_base}/autoruns/020-mihomo-routing.sh",                0o755),
+        ]
+        for local, remote, mode in uploads:
+            log(f"      → {remote}")
+            kwargs: dict[str, Any] = {}
+            if mode is not None:
+                kwargs["mode"] = mode
+            ssh.upload_file(local, remote, **kwargs)
 
-        ssh.upload_file(out / "docker-compose.yml", f"{stack}/docker-compose.yml")
-        ssh.upload_file(out / "configs/xray/config.json", f"{stack}/configs/xray/config.json")
-        ssh.upload_file(out / "configs/mihomo/config.yaml", f"{stack}/configs/mihomo/config.yaml")
-        ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
-
-        ssh.upload_file(out / "startup/startup.sh", f"{startup_base}/startup.sh", mode=0o755)
-        ssh.upload_file(
-            out / "startup/autoruns/010-start-docker.sh",
-            f"{startup_base}/autoruns/010-start-docker.sh",
-            mode=0o755,
-        )
-        ssh.upload_file(
-            out / "startup/autoruns/020-mihomo-routing.sh",
-            f"{startup_base}/autoruns/020-mihomo-routing.sh",
-            mode=0o755,
-        )
-
+        log("[5/6] Применение UCI firewall и перезапуск docker...")
         apply_uci_firewall_and_docker_fix(ssh, cfg)
+        apply_docker_registry_mirrors(ssh, cfg, log=log)
 
         env = _remote_compose_env(usb)
-        code, cout, cerr = ssh.exec(
+        code = ssh.exec_streaming(
             f"{env}; cd '{stack}' && docker compose up -d 2>&1",
+            log=lambda line: log(f"      {line}"),
             timeout=300,
         )
         if code != 0:
-            raise RuntimeError(f"docker compose failed: {cout}\n{cerr}")
+            raise RuntimeError(f"docker compose up завершился с кодом {code}")
+
+        if cfg.get("routing", {}).get("apply_iptables", False):
+            log("      Применяю mihomo routing правила (start)...")
+            ssh.exec_streaming(
+                f"sh '{stack}/mihomo/mihomo-routing.sh' start 2>&1",
+                log=lambda line: log(f"      {line}"),
+                timeout=60,
+            )
 
         if not skip_smoke:
-            res = run_smoke(ssh, cfg)
+            log("[6/6] Smoke-проверки...")
+            res = run_smoke(ssh, cfg, log=lambda line: log(f"      {line}"))
+            for msg in res.messages:
+                log(f"      {msg}")
             if not res.ok:
-                env_rb = _remote_compose_env(usb)
-                ssh.exec_text(f"{env_rb}; cd '{stack}' && docker compose down 2>/dev/null || true")
+                log("      Smoke не прошёл — откат...")
+                ssh.exec_text(f"{env}; cd '{stack}' && docker compose down 2>/dev/null || true")
                 if meta:
                     rollback(ssh, meta)
                 raise RuntimeError("Smoke failed:\n" + "\n".join(res.messages))
+            log("      Smoke OK.")
+        else:
+            log("[6/6] Smoke пропущен (--skip-smoke).")
+
         return meta
     finally:
         ssh.close()
@@ -172,6 +254,7 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         ssh.upload_file(out / "configs/xray/config.json", f"{stack}/configs/xray/config.json")
         ssh.upload_file(out / "configs/mihomo/config.yaml", f"{stack}/configs/mihomo/config.yaml")
         ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
+        ssh.upload_file(out / "mihomo/rollback.sh", f"{stack}/mihomo/rollback.sh", mode=0o755)
         env = _remote_compose_env(usb)
         ssh.exec_text(f"{env}; cd '{stack}' && docker compose up -d 2>&1")
     finally:

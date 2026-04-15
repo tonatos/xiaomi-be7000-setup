@@ -1,5 +1,5 @@
 # Скопируйте в config/router.yaml и подставьте значения.
-# Секреты — в config/router.secrets.yaml (см. router.secrets.example.yaml) или через переменные окружения.
+# SSH-пароль — в config/router.secrets.yaml (см. router.secrets.example.yaml).
 
 router:
   host: "192.168.31.1"
@@ -11,14 +11,22 @@ usb:
   mount_path: ""
 
 stack:
-  # Каталог на USB относительно корня флешки (docker compose + configs)
   relative_dir: "stack"
   backups_relative_dir: "backups"
 
 startup:
-  # Локальная автозагрузка на роутере (firewall include)
   base_dir: "/data/startup"
   autoruns_subdir: "autoruns"
+
+# Настройки Docker на роутере.
+# registry_mirrors — зеркала Docker Hub (docker.io). Применяются через UCI:
+# /etc/config/mi_docker -> globals.registry_mirrors, затем restart mi_docker.
+# Оставьте пустым [], чтобы не менять зеркала. Образы ghcr.io (xray) зеркалами не покрываются —
+# при необходимости замените image в services.xray_server.
+docker:
+  registry_mirrors:
+    - "https://cr.yandex"
+    - "https://dh-mirror.gitverse.ru"
 
 services:
   xray_server:
@@ -30,13 +38,23 @@ services:
     container_name: "mihomo"
     image: "docker.io/metacubex/mihomo:latest"
     mixed_port: 7890
-    socks_port: 7890
     redir_port: 7891
   torrserver:
     enabled: true
     container_name: "torrserver"
     image: "docker.io/yourok/torrserver:latest"
     port: 8090
+  metacubexd:
+    enabled: true
+    container_name: "metacubexd"
+    # Проверенный образ для arm64 (Xiaomi BE7000).
+    image: "gzxhwq/metacubexd:latest"
+    # Порт веб-дашборда на роутере: http://<router.host>:9099
+    port: 9099
+    # Опционально: фиксированный backend для дашборда.
+    # Если не задан, формируется автоматически как
+    # http://<router.host>:<mihomo.external-controller порт>.
+    # default_backend_url: "http://192.168.31.1:9010"
 
 xray:
   log_level: "warning"
@@ -44,12 +62,21 @@ xray:
     tag: "vless-reality-in"
     listen: "0.0.0.0"
     port: 443
+    protocol: "vless"
+  # Список клиентов xray-server (inbound)
+  clients:
+    - id: "00000000-0000-0000-0000-000000000000"
+      flow: "xtls-rprx-vision"
   reality:
     dest: "ya.ru:443"
     xver: 0
     server_names:
       - "ya.ru"
       - "vk.com"
+    # Приватный ключ пары (генерируется: xray x25519)
+    private_key: "REPLACE_WITH_REALITY_PRIVATE_KEY"
+    short_ids:
+      - "0123456789abcdef"
     fingerprint: "chrome"
   routing:
     socks_upstream_host: "127.0.0.1"
@@ -58,21 +85,119 @@ xray:
 # Публичный адрес для клиентов (WAN / VPS). Для vless-link и подсказок.
 public_endpoint:
   host: ""
-  # Если host пуст — в vless-link можно передать --host вручную
 
-# Пример правил iptables для прозрачного прокси (осторожно: зависит от прошивки)
 routing:
   apply_iptables: false
   lan_cidr: "192.168.31.0/24"
+  # IP устройств, которым нужен прямой NAT (Xbox, PlayStation, Nintendo и др.).
+  # Mihomo завершает TCP-соединение и открывает новое от имени роутера, меняя
+  # source port — из-за этого Xbox не может определить NAT-тип. Устройства из
+  # этого списка обходят прозрачный прокси и используют стандартный NAT роутера.
+  # Назначьте таким устройствам статический DHCP и укажите их IP здесь:
+  excluded_ips: []
+  # excluded_ips:
+  #   - "192.168.31.100"  # Xbox Series X
 
-mihomo_proxy:
-  # Шаблон upstream для mihomo (заполните в secrets или здесь для теста)
-  name: "upstream"
-  server: ""
-  port: 443
-  uuid: ""
-  flow: "xtls-rprx-vision"
-  sni: "ya.ru"
-  fingerprint: "chrome"
-  public_key: ""
-  short_id: ""
+# Конфигурация mihomo. Ключи используют оригинальные имена (с дефисами),
+# так как разделы сериализуются напрямую в YAML через фильтр toyaml.
+mihomo:
+  mode: rule
+  log-level: info
+
+  tun:
+    enable: false
+    stack: system
+
+  sniffer:
+    enable: true
+    force-dns-mapping: true
+    parse-pure-ip: true
+    sniffing:
+      - tls
+      - http
+    override-destination: true
+
+  dns:
+    enable: true
+    listen: "0.0.0.0:1053"
+    ipv6: false
+    enhanced-mode: fake-ip
+    fake-ip-range: 198.18.0.1/16
+    nameserver:
+      - 1.1.1.1
+      - 8.8.8.8
+    fallback:
+      - tls://1.1.1.1:853
+      - tls://8.8.8.8:853
+    fallback-filter:
+      geoip: true
+      geosite:
+        - category-porn
+        - openai
+    nameserver-policy:
+      "geosite:category-ru":
+        - 77.88.8.8
+        - 77.88.8.1
+
+  # Поддерживаются любые типы прокси mihomo: ss, vless, vmess, trojan и др.
+  # Пример для Shadowsocks:
+  proxies:
+    - name: "ss1"
+      type: ss
+      server: ""
+      port: 443
+      cipher: chacha20-ietf-poly1305
+      password: ""
+      udp: false
+
+  # Пример для VLESS+Reality (mihomo outbound):
+  # proxies:
+  #   - name: "upstream"
+  #     type: vless
+  #     server: ""
+  #     port: 443
+  #     uuid: ""
+  #     network: tcp
+  #     tls: true
+  #     udp: true
+  #     flow: "xtls-rprx-vision"
+  #     servername: "ya.ru"
+  #     client-fingerprint: "chrome"
+  #     reality-opts:
+  #       public-key: ""
+  #       short-id: ""
+
+  proxy-groups:
+    - name: "Proxy"
+      type: select
+      proxies:
+        - ss1
+        - DIRECT
+
+  rule-providers:
+    refilter_domains:
+      type: http
+      behavior: domain
+      url: "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/domains_all.lst"
+      path: ./ruleset/refilter_domains.txt
+      interval: 86400
+      format: text
+    refilter_ips:
+      type: http
+      behavior: ipcidr
+      url: "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/ipsum.lst"
+      path: ./ruleset/refilter_ips.txt
+      interval: 86400
+      format: text
+
+  rules:
+    - RULE-SET,refilter_domains,Proxy
+    - RULE-SET,refilter_ips,Proxy
+    - GEOSITE,category-porn,Proxy
+    - GEOSITE,category-ai-!cn,Proxy
+    - GEOIP,CN,DIRECT
+    - GEOIP,RU,DIRECT
+    - MATCH,DIRECT
+
+  external-controller: "0.0.0.0:9010"
+  secret: ""

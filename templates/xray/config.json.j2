@@ -7,13 +7,15 @@
       "tag": "{{ xray.inbound.tag }}",
       "listen": "{{ xray.inbound.listen }}",
       "port": {{ xray.inbound.port }},
-      "protocol": "vless",
+      "protocol": "{{ xray.inbound.protocol | default('vless') }}",
       "settings": {
         "clients": [
+{% for client in xray.clients %}
           {
-            "id": "{{ xray.vless_uuid }}",
-            "flow": "xtls-rprx-vision"
-          }
+            "id": {{ client.id | tojson }},
+            "flow": {{ client.flow | default('xtls-rprx-vision') | tojson }}
+          }{{ "," if not loop.last }}
+{% endfor %}
         ],
         "decryption": "none"
       },
@@ -25,8 +27,8 @@
           "target": "{{ xray.reality.dest }}",
           "xver": {{ xray.reality.xver | default(0) }},
           "serverNames": {{ xray.reality.server_names | tojson }},
-          "privateKey": "{{ xray.reality_private_key }}",
-          "shortIds": {{ xray.short_ids | tojson }},
+          "privateKey": {{ xray.reality.private_key | tojson }},
+          "shortIds": {{ xray.reality.short_ids | tojson }},
           "fingerprint": "{{ xray.reality.fingerprint | default('chrome') }}"
         }
       },

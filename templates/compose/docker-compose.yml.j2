@@ -17,7 +17,8 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - ./configs/mihomo:/root/.config/mihomo:ro
+      # mihomo подкачивает GeoSite/GeoIP в runtime, поэтому каталог должен быть RW
+      - ./configs/mihomo:/root/.config/mihomo
 {% endif %}
 {% if services.torrserver.enabled | default(true) %}
 
@@ -26,4 +27,16 @@ services:
     container_name: {{ services.torrserver.container_name | tojson }}
     restart: unless-stopped
     network_mode: host
+{% endif %}
+{% set metacubexd = services.metacubexd | default({}) %}
+{% if metacubexd.enabled | default(true) %}
+
+  {{ metacubexd.container_name | default("metacubexd") }}:
+    image: {{ metacubexd.image | default("gzxhwq/metacubexd:latest") | tojson }}
+    container_name: {{ metacubexd.container_name | default("metacubexd") | tojson }}
+    restart: unless-stopped
+    ports:
+      - "{{ services_metacubexd_port }}:80"
+    environment:
+      - DEFAULT_BACKEND_URL={{ services_metacubexd_default_backend_url }}
 {% endif %}
