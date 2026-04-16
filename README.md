@@ -1,6 +1,6 @@
 # xiaomi-be7000-setup
 
-IaC-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose на USB, **Xray (VLESS+Reality)**, **mihomo**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
+DevOps-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
 
 - устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
 - [Mihomo Dashboard, The Official One, XD](https://github.com/MetaCubeX/metacubexd) — для мониторинга вашего Mihomo-клиента
@@ -142,18 +142,7 @@ poetry run xiaomi-router deploy
 CLI-эквиваленты (без `task`):
 
 ```bash
-poetry run xiaomi-router bootstrap-ssh
-poetry run xiaomi-router render [--discover-usb]
-poetry run xiaomi-router deploy [--skip-backup] [--skip-smoke] [--no-rollback-on-smoke-fail]
-poetry run xiaomi-router smoke
-poetry run xiaomi-router sync-pull
-poetry run xiaomi-router sync-push
-poetry run xiaomi-router rollback path/to/deploy-....json
-poetry run xiaomi-router diagnose
-poetry run xiaomi-router vless-link [--host <public-host>]
-poetry run xiaomi-router setup-opkg-usb
-poetry run xiaomi-router setup-entware
-poetry run xiaomi-router setup-compose [--write-profile]
+poetry run xiaomi-router {bootstrap-ssh, render, ...}
 ```
 
 
@@ -161,7 +150,7 @@ poetry run xiaomi-router setup-compose [--write-profile]
 
 ```bash
 scp root@192.168.31.1:/mnt/usb-*/backups/deploy-*.json ./
-poetry run xiaomi-router rollback ./deploy-....json
+task rollback ./deploy-....json
 ```
 
 ## Структура репозитория
