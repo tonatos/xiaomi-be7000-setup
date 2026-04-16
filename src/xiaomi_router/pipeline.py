@@ -269,7 +269,8 @@ def deploy(
 
         apply_dnsmasq_forward_to_adguardhome(ssh, cfg, log=log)
 
-        if cfg.get("routing", {}).get("apply_iptables", False):
+        routing = cfg.get("routing", {})
+        if routing.get("apply_iptables", False) or routing.get("block_quic", False):
             log("      Применяю mihomo routing правила (start)...")
             ssh.exec_streaming(
                 f"sh '{stack}/mihomo/mihomo-routing.sh' start 2>&1",

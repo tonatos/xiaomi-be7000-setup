@@ -183,6 +183,10 @@ routing:
   lan_cidr: "192.168.31.0/24"
   # Список IP, которые нужно исключить из transparent proxy.
   excluded_ips: []
+  # Блокировать QUIC (HTTP/3, UDP/443) из LAN через iptables FORWARD DROP.
+  # Браузеры автоматически деградируют на TCP/443 (HTTP/2), который идёт через прокси.
+  # Рекомендуется включить при apply_iptables: true, чтобы QUIC не обходил прокси напрямую.
+  block_quic: false
 
 # Ключи здесь соответствуют нативному формату mihomo.
 # Документация: https://wiki.metacubex.one/config/

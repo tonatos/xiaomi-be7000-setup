@@ -33,6 +33,12 @@ _start() {
 {% else %}
     logger -t mihomo-routing "apply_iptables=false — правила не применялись (настройте routing в router.yaml)"
 {% endif %}
+{% if routing.block_quic | default(false) %}
+    # Блокируем QUIC (HTTP/3, UDP/443) из LAN: браузеры деградируют на TCP/443 через прокси
+    iptables -C FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || \
+      iptables -I FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP
+    logger -t mihomo-routing "iptables FORWARD DROP UDP/443 (QUIC) for {{ routing.lan_cidr }}"
+{% endif %}
 }
 
 _stop() {
@@ -40,6 +46,9 @@ _stop() {
     iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN" 2>/dev/null || true
     iptables -t nat -F "$CHAIN" 2>/dev/null || true
     iptables -t nat -X "$CHAIN" 2>/dev/null || true
+{% endif %}
+{% if routing.block_quic | default(false) %}
+    iptables -D FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || true
 {% endif %}
 }
 
