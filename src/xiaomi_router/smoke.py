@@ -14,6 +14,26 @@ class SmokeResult:
     messages: list[str]
 
 
+def _check_internet(ssh: RouterSSH) -> tuple[bool, str]:
+    """Проверяет IP-связность с интернетом через ping до 1.1.1.1."""
+    _, out, _ = ssh.exec("ping -c2 -W3 1.1.1.1 >/dev/null 2>&1 && echo OK || echo FAIL")
+    ok = "OK" in (out.strip().splitlines()[-1] if out.strip() else "FAIL")
+    return ok, f"internet (ping 1.1.1.1) -> {'OK' if ok else 'FAIL'}"
+
+
+def _check_dns(ssh: RouterSSH) -> tuple[bool, str]:
+    """Проверяет DNS-резолвинг через nslookup или ping -c1 по имени."""
+    _, out, _ = ssh.exec(
+        "if command -v nslookup >/dev/null 2>&1; then "
+        "  nslookup one.one.one.one >/dev/null 2>&1 && echo OK || echo FAIL; "
+        "else "
+        "  ping -c1 -W3 one.one.one.one >/dev/null 2>&1 && echo OK || echo FAIL; "
+        "fi"
+    )
+    ok = "OK" in (out.strip().splitlines()[-1] if out.strip() else "FAIL")
+    return ok, f"dns (one.one.one.one) -> {'OK' if ok else 'FAIL'}"
+
+
 def _check_tcp(ssh: RouterSSH, host: str, port: int) -> tuple[bool, str]:
     script = (
         f"netstat -tln 2>/dev/null | grep -Eq '[:.]({port})\\b' "
@@ -76,6 +96,12 @@ def run_smoke(
         "[ -x \"$D\" ] && \"$D\" ps --format '{{.Names}} {{.Status}}' 2>&1 | head -20"
     )
     msgs.append(f"docker ps:\n{out2.strip()}")
+
+    _, inet_msg = _check_internet(ssh)
+    msgs.append(inet_msg)
+
+    _, dns_msg = _check_dns(ssh)
+    msgs.append(dns_msg)
 
     sx = services.get("xray_server", {})
     if sx.get("enabled", True):

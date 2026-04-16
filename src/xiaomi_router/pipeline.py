@@ -10,7 +10,11 @@ from xiaomi_router.backup import create_backup, rollback
 from xiaomi_router.config_loader import require_router_password
 from xiaomi_router.paths import rendered_dir
 from xiaomi_router.render import render_all
-from xiaomi_router.setup_extra import ensure_compose_with_optional_entware, ensure_usb_shell_env
+from xiaomi_router.setup_extra import (
+    ensure_compose_with_optional_entware,
+    ensure_usb_shell_env,
+    remote_compose_env,
+)
 from xiaomi_router.smoke import run_smoke
 from xiaomi_router.ssh_util import RouterSSH
 
@@ -32,14 +36,6 @@ def _startup_paths(cfg: dict[str, Any]) -> tuple[str, str]:
     sub = st.get("autoruns_subdir", "autoruns")
     return base, f"{base.rstrip('/')}/{sub}"
 
-
-def _remote_compose_env(usb: str) -> str:
-    return (
-        f"export PATH='{usb}/mi_docker/docker-binaries:'\"$PATH\"; "
-        f"if [ -f '{usb}/opt/usb-env.sh' ]; then . '{usb}/opt/usb-env.sh'; fi; "
-        f"if [ -f '{usb}/opt/docker-cli/compose-env.sh' ]; then "
-        f". '{usb}/opt/docker-cli/compose-env.sh'; fi"
-    )
 
 
 def apply_uci_firewall_and_docker_fix(ssh: RouterSSH, cfg: dict[str, Any]) -> None:
@@ -171,7 +167,7 @@ def deploy(
         ensure_usb_shell_env(ssh, usb, log=log)
         ensure_compose_with_optional_entware(ssh, usb, log=log)
 
-        env = _remote_compose_env(usb)
+        env = remote_compose_env(usb)
         code = ssh.exec_streaming(
             f"{env}; cd '{stack}' && docker compose up -d 2>&1",
             log=lambda line: log(f"      {line}"),
@@ -265,7 +261,7 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
         ssh.upload_file(out / "mihomo/rollback.sh", f"{stack}/mihomo/rollback.sh", mode=0o755)
         ensure_compose_with_optional_entware(ssh, usb)
-        env = _remote_compose_env(usb)
+        env = remote_compose_env(usb)
         ssh.exec_text(f"{env}; cd '{stack}' && docker compose up -d 2>&1")
     finally:
         ssh.close()

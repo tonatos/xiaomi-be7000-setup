@@ -276,16 +276,11 @@ def cmd_setup_entware(
 
 @app.command("setup-compose")
 def cmd_setup_compose(
-    write_profile: bool = typer.Option(
-        False,
-        "--write-profile",
-        help="Добавить автоподхват USB env в /etc/profile на роутере",
-    ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),
 ) -> None:
     cfg = _load(config, secrets)
-    setup_compose(cfg, write_profile=write_profile)
+    setup_compose(cfg)
 
 
 def main() -> None:

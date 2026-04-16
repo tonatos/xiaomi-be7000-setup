@@ -22,7 +22,7 @@ def _ssh_from_cfg(cfg: dict[str, Any]) -> RouterSSH:
     )
 
 
-def _remote_compose_env(usb: str) -> str:
+def remote_compose_env(usb: str) -> str:
     return (
         f"export PATH='{usb}/mi_docker/docker-binaries:'\"$PATH\"; "
         f"if [ -f '{usb}/opt/usb-env.sh' ]; then . '{usb}/opt/usb-env.sh'; fi; "
@@ -188,7 +188,7 @@ def _prepare_opkg_usb_reserve(
 
 def has_docker_compose(ssh: RouterSSH, usb: str) -> bool:
     code, _, _ = ssh.exec(
-        f"{_remote_compose_env(usb)}; docker compose version >/dev/null 2>&1",
+        f"{remote_compose_env(usb)}; docker compose version >/dev/null 2>&1",
         timeout=30,
     )
     return code == 0
@@ -246,13 +246,8 @@ def install_compose_plugin(
     ssh: RouterSSH,
     usb: str,
     *,
-    write_profile: bool = False,
     log: Callable[[str], None] = _Noop,
 ) -> None:
-    compose_usb_hook = (
-        f"if [ -f '{usb}/opt/docker-cli/compose-env.sh' ]; then "
-        f". '{usb}/opt/docker-cli/compose-env.sh'; fi"
-    )
     script = rf"""#!/bin/sh
 set -e
 USB='{usb}'
@@ -296,12 +291,6 @@ export PATH="$DOCKER_BIN:\$PATH"
 ENVEOF
 chmod +x "$ENV_SH"
 
-USB_ENV="$OPT/usb-env.sh"
-if [ -f "$USB_ENV" ] && ! grep -qF "compose-env.sh" "$USB_ENV" 2>/dev/null; then
-  echo "" >> "$USB_ENV"
-  echo "{compose_usb_hook}" >> "$USB_ENV"
-fi
-
 . "$ENV_SH"
 docker compose version
 """
@@ -310,9 +299,6 @@ docker compose version
     _raise_if_failed(code, out, err, step="setup-compose")
     for line in out.strip().splitlines():
         log(f"      {line}")
-
-    if write_profile:
-        _ensure_usb_env_profile_hook(ssh, log=log)
 
 
 def ensure_compose_with_optional_entware(
@@ -359,14 +345,10 @@ def setup_entware(cfg: dict[str, Any]) -> None:
         ssh.close()
 
 
-def setup_compose(
-    cfg: dict[str, Any],
-    *,
-    write_profile: bool = False,
-) -> None:
+def setup_compose(cfg: dict[str, Any]) -> None:
     ssh = _ssh_from_cfg(cfg)
     try:
         usb = ssh.usb_mount_from_router(cfg.get("usb", {}).get("mount_path"))
-        install_compose_plugin(ssh, usb, write_profile=write_profile, log=print)
+        install_compose_plugin(ssh, usb, log=print)
     finally:
         ssh.close()

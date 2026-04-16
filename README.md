@@ -90,7 +90,7 @@ poetry run xiaomi-router bootstrap-ssh
 ```bash
 task setup-shell-env    # shell PATH (docker / compose / opkg, если доступны)
 task setup-entware      # опционально, Entware в bind-mount /opt на USB
-task setup-compose      # плагин docker compose на USB + опционально --write-profile
+task setup-compose      # плагин docker compose на USB
 ```
 
 Что это значит:
