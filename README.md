@@ -190,8 +190,8 @@ task rollback ./deploy-....json
 По текущим дефолтам в исходниках `AdGuard Home`:
 
 - `AdGuard DNS filter` включен по умолчанию;
+- `AdGuard Russian filter` присутствует, включен по умолчанию.
 - `AdAway Default Blocklist` присутствует, но выключен.
-- `AdGuard Russian filter` присутствует, но выключен.
 
 В проекте эти же дефолты закладываются в рендер `configs/adguardhome/conf/AdGuardHome.yaml`.
 
