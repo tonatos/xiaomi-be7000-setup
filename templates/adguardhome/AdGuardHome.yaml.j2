@@ -1,0 +1,60 @@
+http:
+  address: "0.0.0.0:{{ services_adguardhome_admin_port }}"
+{% if services_adguardhome_http_proxy %}
+http_proxy: {{ services_adguardhome_http_proxy | tojson }}
+{% endif %}
+
+dns:
+  bind_hosts:
+{% for host in services_adguardhome_bind_hosts %}
+    - {{ host | tojson }}
+{% endfor %}
+  port: {{ services_adguardhome_dns_port }}
+  use_private_ptr_resolvers: false
+  upstream_dns:
+{% for upstream in services_adguardhome_upstream_dns %}
+    - {{ upstream | tojson }}
+{% endfor %}
+{% if services_adguardhome_bootstrap_dns %}
+  bootstrap_dns:
+{% for bootstrap in services_adguardhome_bootstrap_dns %}
+    - {{ bootstrap | tojson }}
+{% endfor %}
+{% endif %}
+{% if services_adguardhome_fallback_dns %}
+  fallback_dns:
+{% for fallback in services_adguardhome_fallback_dns %}
+    - {{ fallback | tojson }}
+{% endfor %}
+{% endif %}
+{% if services_adguardhome_allowed_clients %}
+  allowed_clients:
+{% for client in services_adguardhome_allowed_clients %}
+    - {{ client | tojson }}
+{% endfor %}
+{% endif %}
+{% if services_adguardhome_disallowed_clients %}
+  disallowed_clients:
+{% for client in services_adguardhome_disallowed_clients %}
+    - {{ client | tojson }}
+{% endfor %}
+{% endif %}
+
+filtering:
+  protection_enabled: true
+  filtering_enabled: true
+  filters_update_interval: {{ services_adguardhome_filters_update_interval }}
+
+filters:
+  - enabled: true
+    url: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt"
+    name: "AdGuard DNS filter"
+    id: 1
+  - enabled: true
+    url: "https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_1_Russian/filter.txt"
+    name: "AdGuard Russian filter"
+    id: 101
+  - enabled: false
+    url: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt"
+    name: "AdAway Default Blocklist"
+    id: 2

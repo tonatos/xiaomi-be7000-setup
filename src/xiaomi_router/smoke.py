@@ -22,10 +22,10 @@ def _check_internet(ssh: RouterSSH) -> tuple[bool, str]:
 
 
 def _check_dns(ssh: RouterSSH) -> tuple[bool, str]:
-    """Проверяет DNS-резолвинг через nslookup или ping -c1 по имени."""
+    """Проверяет DNS-резолвинг через локальный dnsmasq (127.0.0.1)."""
     _, out, _ = ssh.exec(
         "if command -v nslookup >/dev/null 2>&1; then "
-        "  nslookup one.one.one.one >/dev/null 2>&1 && echo OK || echo FAIL; "
+        "  nslookup one.one.one.one 127.0.0.1 >/dev/null 2>&1 && echo OK || echo FAIL; "
         "else "
         "  ping -c1 -W3 one.one.one.one >/dev/null 2>&1 && echo OK || echo FAIL; "
         "fi"
@@ -120,8 +120,13 @@ def run_smoke(
     ts = services.get("torrserver", {})
     if ts.get("enabled", True):
         p = int(ts.get("port", 8090))
-        ok, m = _wait_tcp(ssh, "127.0.0.1", p, log=log)
+        ok, m = _wait_tcp(ssh, "127.0.0.1", p, timeout_s=60, log=log)
         msgs.append(m)
+        if not ok:
+            name = str(ts.get("container_name", "torrserver"))
+            logs = _tail_container_logs(ssh, name)
+            if logs:
+                msgs.append(f"docker logs {name} (tail):\n{logs}")
         ok_all = ok_all and ok
 
     md = services.get("metacubexd", {})
@@ -131,4 +136,33 @@ def run_smoke(
         msgs.append(m)
         ok_all = ok_all and ok
 
+    agh = services.get("adguardhome", {})
+    if agh.get("enabled", True):
+        dns_port = int(agh.get("dns_port", 5353))
+        admin_port = int(agh.get("admin_port", 3000))
+        for p in (dns_port, admin_port):
+            ok, m = _wait_tcp(ssh, "127.0.0.1", p, log=log)
+            msgs.append(m)
+            if not ok:
+                name = str(agh.get("container_name", "adguardhome"))
+                logs = _tail_container_logs(ssh, name)
+                if logs:
+                    msgs.append(f"docker logs {name} (tail):\n{logs}")
+            ok_all = ok_all and ok
+
     return SmokeResult(ok=ok_all, messages=msgs)
+
+
+def _tail_container_logs(ssh: RouterSSH, container_name: str, tail: int = 80) -> str:
+    """
+    Пытается получить последние строки docker logs с роутера.
+    Используется как диагностика при падении smoke.
+    """
+    script = (
+        "D=$(ls /mnt/usb*/mi_docker/docker-binaries/docker 2>/dev/null | head -1); "
+        "if [ -x \"$D\" ]; then "
+        f"  \"$D\" logs --tail {int(tail)} {container_name} 2>&1 || true; "
+        "else echo NO_DOCKER_BIN; fi"
+    )
+    _, out, _ = ssh.exec(script)
+    return out.strip()

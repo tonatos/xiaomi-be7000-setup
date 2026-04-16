@@ -50,6 +50,39 @@ def _extract_mihomo_controller_port(cfg: dict[str, Any]) -> int:
         return 9090
 
 
+def _as_flat_str_list(value: Any, default: list[str]) -> list[str]:
+    """
+    Нормализует YAML-значение в список строк.
+
+    Важно для user-config: при ошибках копипасты в YAML могут появляться вложенные
+    списки, что потом ломает сторонние парсеры (например AGH с ошибкой
+    "cannot unmarshal !!seq into string").
+    """
+
+    def is_seq(v: Any) -> bool:
+        return isinstance(v, (list, tuple))
+
+    out: list[str] = []
+    stack: list[Any] = [value]
+    while stack:
+        cur = stack.pop(0)
+        if cur is None:
+            continue
+        if isinstance(cur, str):
+            s = cur.strip()
+            if s:
+                out.append(s)
+            continue
+        if is_seq(cur):
+            stack[0:0] = list(cur)
+            continue
+        s = str(cur).strip()
+        if s:
+            out.append(s)
+
+    return out or default
+
+
 def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     stack_rel = cfg.get("stack", {}).get("relative_dir", "stack")
     stack_path = f"{usb_mount}/{stack_rel}".replace("//", "/")
@@ -57,6 +90,7 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     startup = cfg.get("startup", {})
     sm = cfg.get("services", {}).get("mihomo", {})
     sd = cfg.get("services", {}).get("metacubexd", {})
+    sa = cfg.get("services", {}).get("adguardhome", {})
     router_host = str(cfg.get("router", {}).get("host", "192.168.31.1")).strip() or "192.168.31.1"
     mihomo_controller_port = _extract_mihomo_controller_port(cfg)
     return {
@@ -72,6 +106,34 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
         "services_metacubexd_default_backend_url": sd.get(
             "default_backend_url",
             f"http://{router_host}:{mihomo_controller_port}",
+        ),
+        "services_adguardhome_dns_port": sa.get("dns_port", 5353),
+        "services_adguardhome_admin_port": sa.get("admin_port", 3000),
+        "services_adguardhome_upstream_dns": _as_flat_str_list(
+            sa.get("upstream_dns"),
+            default=["https://9.9.9.10/dns-query", "https://149.112.112.10/dns-query"],
+        ),
+        "services_adguardhome_bootstrap_dns": _as_flat_str_list(
+            sa.get("bootstrap_dns"),
+            default=[],
+        ),
+        "services_adguardhome_fallback_dns": _as_flat_str_list(
+            sa.get("fallback_dns"),
+            default=[],
+        ),
+        "services_adguardhome_filters_update_interval": sa.get("filters_update_interval", 24),
+        "services_adguardhome_bind_hosts": _as_flat_str_list(
+            sa.get("bind_hosts"),
+            default=["0.0.0.0"],
+        ),
+        "services_adguardhome_http_proxy": str(sa.get("http_proxy", "") or "").strip(),
+        "services_adguardhome_allowed_clients": _as_flat_str_list(
+            sa.get("allowed_clients"),
+            default=[],
+        ),
+        "services_adguardhome_disallowed_clients": _as_flat_str_list(
+            sa.get("disallowed_clients"),
+            default=[],
         ),
     }
 
@@ -108,6 +170,10 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
     # compose
     tpl = env.get_template("compose/docker-compose.yml.j2")
     w("docker-compose.yml", tpl.render(**ctx))
+
+    # adguardhome
+    tpl = env.get_template("adguardhome/AdGuardHome.yaml.j2")
+    w("configs/adguardhome/conf/AdGuardHome.yaml", tpl.render(**ctx))
 
     # autorun + startup
     tpl = env.get_template("startup.sh.j2")

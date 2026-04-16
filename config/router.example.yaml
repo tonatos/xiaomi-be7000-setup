@@ -25,6 +25,22 @@ services:
   metacubexd:
     # Включить web-dashboard metacubexd.
     enabled: true
+  adguardhome:
+    # Включить AdGuard Home.
+    enabled: true
+    # DNS-порт AGH для форвардинга из dnsmasq.
+    dns_port: 5353
+    # Порт web UI (первичный wizard и админка).
+    admin_port: 3000
+    # Upstream DNS для AdGuard Home (DoH по IP, без bootstrap).
+    upstream_dns:
+      - "https://9.9.9.10/dns-query"
+      - "https://149.112.112.10/dns-query"
+    # Для upstream по IP можно оставить пустым.
+    # Если зададите hostname upstream (DoH/DoT), заполните bootstrap_dns.
+    bootstrap_dns: []
+    # При необходимости ограничьте доступ к DNS по IP/CIDR.
+    allowed_clients: []
   # Опционально: добавьте собственные сервисы в общий docker-compose.
   # Формат каждого элемента — как в Docker Compose services.<name>.
   # custom:

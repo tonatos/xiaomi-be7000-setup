@@ -69,6 +69,14 @@ def apply_docker_registry_mirrors(
     if not mirrors:
         return
 
+    # Этап применяем только если зеркала уже были настроены на роутере.
+    # Это позволяет не трогать стабильные установки, где зеркала не используются.
+    _, current_raw, _ = ssh.exec("uci show mi_docker.globals.registry_mirrors 2>/dev/null || true")
+    current_lines = [ln.strip() for ln in current_raw.splitlines() if ln.strip()]
+    if not current_lines:
+        log("      registry_mirrors на роутере не настроены — пропускаю применение (по политике).")
+        return
+
     log("      Настройка registry_mirrors в /etc/config/mi_docker...")
     validated: list[str] = []
     for mirror in mirrors:
@@ -89,6 +97,32 @@ def apply_docker_registry_mirrors(
         log("      registry_mirrors пустой после валидации — пропускаю.")
         return
 
+    # Примитивная нормализация текущего списка из UCI для сравнения.
+    current_vals: list[str] = []
+    for ln in current_lines:
+        # Пример: mi_docker.globals.registry_mirrors='https://a' 'https://b'
+        if "=" not in ln:
+            continue
+        rhs = ln.split("=", 1)[1].strip()
+        # Соберём все '...'
+        parts = []
+        buf = ""
+        in_q = False
+        for ch in rhs:
+            if ch == "'":
+                in_q = not in_q
+                if not in_q and buf:
+                    parts.append(buf)
+                    buf = ""
+                continue
+            if in_q:
+                buf += ch
+        current_vals.extend([p.rstrip("/") for p in parts if p.strip()])
+
+    if sorted(current_vals) == sorted([m.rstrip("/") for m in validated]):
+        log("      registry_mirrors уже установлены — перезапуск mi_docker не требуется.")
+        return
+
     cmds = ["uci -q delete mi_docker.globals.registry_mirrors 2>/dev/null || true"]
     for m in validated:
         cmds.append(f"uci add_list mi_docker.globals.registry_mirrors='{m}'")
@@ -104,6 +138,53 @@ def apply_docker_registry_mirrors(
     ssh.exec_text("/etc/init.d/mi_docker restart 2>/dev/null || true")
     time.sleep(5)
     log("      mi_docker перезапущен.")
+
+
+def apply_dnsmasq_forward_to_adguardhome(
+    ssh: RouterSSH,
+    cfg: dict[str, Any],
+    log: Callable[[str], None] = _Noop,
+) -> None:
+    agh = cfg.get("services", {}).get("adguardhome", {})
+    dns_port = int(agh.get("dns_port", 5353))
+    dns_host = str(agh.get("dns_host", "127.0.0.1")).strip() or "127.0.0.1"
+    dns_upstream = f"{dns_host}#{dns_port}"
+
+    if not agh.get("enabled", True):
+        # Самовосстановление: если раньше уже включали AGH-forward,
+        # при выключенном AGH возвращаем dnsmasq к системным резолверам.
+        _, out, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        has_local_forward = any(dns_upstream in ln for ln in lines)
+        has_noresolv = any("noresolv='1'" in ln for ln in lines)
+        if has_local_forward or has_noresolv:
+            log("      AdGuard Home отключен — восстанавливаю штатный dnsmasq (без local forward).")
+            cmds = [
+                "uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null || true",
+                "uci -q delete dhcp.@dnsmasq[0].noresolv 2>/dev/null || true",
+                "uci commit dhcp",
+            ]
+            ssh.exec_text("; ".join(cmds))
+            ssh.exec_text("/etc/init.d/dnsmasq restart 2>/dev/null || true")
+            log("      dnsmasq восстановлен к системным upstream.")
+        else:
+            log("      AdGuard Home отключен — dnsmasq уже в штатном режиме.")
+        return
+
+    log(f"      Настройка dnsmasq -> {dns_upstream} через UCI...")
+    cmds = [
+        "uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null || true",
+        "uci set dhcp.@dnsmasq[0].noresolv='1'",
+        f"uci add_list dhcp.@dnsmasq[0].server='{dns_upstream}'",
+        "uci commit dhcp",
+    ]
+    ssh.exec_text("; ".join(cmds))
+    _, out, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
+    if out.strip():
+        for line in out.strip().splitlines():
+            log(f"      {line}")
+    ssh.exec_text("/etc/init.d/dnsmasq restart 2>/dev/null || true")
+    log("      dnsmasq перезапущен.")
 
 
 def deploy(
@@ -143,11 +224,16 @@ def deploy(
         log(f"      Артефакты: {out}")
 
         log("[4/6] Загрузка файлов на роутер...")
-        ssh.exec_text(f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo' '{stack}/mihomo'")
+        ssh.exec_text(
+            f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo' "
+            f"'{stack}/configs/adguardhome/conf' '{stack}/configs/adguardhome/work' "
+            f"'{stack}/mihomo'"
+        )
         uploads = [
             (out / "docker-compose.yml",                          f"{stack}/docker-compose.yml",                                   None),
             (out / "configs/xray/config.json",                    f"{stack}/configs/xray/config.json",                             None),
             (out / "configs/mihomo/config.yaml",                  f"{stack}/configs/mihomo/config.yaml",                           None),
+            (out / "configs/adguardhome/conf/AdGuardHome.yaml",   f"{stack}/configs/adguardhome/conf/AdGuardHome.yaml",            None),
             (out / "mihomo/mihomo-routing.sh",                    f"{stack}/mihomo/mihomo-routing.sh",                             0o755),
             (out / "mihomo/rollback.sh",                          f"{stack}/mihomo/rollback.sh",                                   0o755),
             (out / "startup/startup.sh",                          f"{startup_base}/startup.sh",                                    0o755),
@@ -175,6 +261,13 @@ def deploy(
         )
         if code != 0:
             raise RuntimeError(f"docker compose up завершился с кодом {code}")
+
+        # AdGuard Home читает конфиг при старте. При обновлении AdGuardHome.yaml
+        # безопаснее перезапустить контейнер, чтобы избежать работы со старым in-memory cfg.
+        if cfg.get("services", {}).get("adguardhome", {}).get("enabled", True):
+            ssh.exec_text(f"{env}; cd '{stack}' && docker compose restart adguardhome 2>/dev/null || true")
+
+        apply_dnsmasq_forward_to_adguardhome(ssh, cfg, log=log)
 
         if cfg.get("routing", {}).get("apply_iptables", False):
             log("      Применяю mihomo routing правила (start)...")
@@ -228,6 +321,7 @@ def pull_configs(
         for rel in (
             "configs/xray/config.json",
             "configs/mihomo/config.yaml",
+            "configs/adguardhome/conf/AdGuardHome.yaml",
             "docker-compose.yml",
             "mihomo/mihomo-routing.sh",
         ):
@@ -258,11 +352,18 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         ssh.upload_file(out / "docker-compose.yml", f"{stack}/docker-compose.yml")
         ssh.upload_file(out / "configs/xray/config.json", f"{stack}/configs/xray/config.json")
         ssh.upload_file(out / "configs/mihomo/config.yaml", f"{stack}/configs/mihomo/config.yaml")
+        ssh.upload_file(
+            out / "configs/adguardhome/conf/AdGuardHome.yaml",
+            f"{stack}/configs/adguardhome/conf/AdGuardHome.yaml",
+        )
         ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
         ssh.upload_file(out / "mihomo/rollback.sh", f"{stack}/mihomo/rollback.sh", mode=0o755)
         ensure_compose_with_optional_entware(ssh, usb)
         env = remote_compose_env(usb)
         ssh.exec_text(f"{env}; cd '{stack}' && docker compose up -d 2>&1")
+        if cfg.get("services", {}).get("adguardhome", {}).get("enabled", True):
+            ssh.exec_text(f"{env}; cd '{stack}' && docker compose restart adguardhome 2>/dev/null || true")
+        apply_dnsmasq_forward_to_adguardhome(ssh, cfg)
     finally:
         ssh.close()
 

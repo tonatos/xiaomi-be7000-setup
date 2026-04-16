@@ -26,6 +26,7 @@ def create_backup(
     startup_tar = f"{bk}/{name}-startup.tar.gz"
     stack_tar = f"{bk}/{name}-stack.tar.gz"
     fw_path = f"{bk}/{name}.firewall.export"
+    dhcp_path = f"{bk}/{name}.dhcp.export"
     meta_path = f"{bk}/{name}.json"
 
     ssh.exec_text(f"mkdir -p '{bk}'")
@@ -47,6 +48,7 @@ def create_backup(
         ssh.exec_text(f": > '{stack_tar}'")
 
     ssh.exec_text(f"uci export firewall > '{fw_path}' 2>/dev/null || true")
+    ssh.exec_text(f"uci export dhcp > '{dhcp_path}' 2>/dev/null || true")
 
     meta: dict[str, Any] = {
         "name": name,
@@ -54,6 +56,7 @@ def create_backup(
         "tar_startup": startup_tar,
         "tar_stack": stack_tar,
         "firewall_export": fw_path,
+        "dhcp_export": dhcp_path,
         "startup_base": startup_base,
         "stack_path": stack_path,
         "usb_mount": usb_mount,
@@ -66,6 +69,7 @@ def rollback(ssh: RouterSSH, meta: dict[str, Any]) -> None:
     tar_s = meta.get("tar_startup")
     tar_st = meta.get("tar_stack")
     fw = meta.get("firewall_export")
+    dhcp = meta.get("dhcp_export")
     usb = meta.get("usb_mount", "")
     if tar_s:
         ssh.exec_text(
@@ -80,4 +84,10 @@ def rollback(ssh: RouterSSH, meta: dict[str, Any]) -> None:
             f"if [ -s '{fw}' ]; then "
             f"( uci import -q < '{fw}' && uci commit firewall ) 2>/dev/null || true; "
             f"/etc/init.d/firewall reload 2>/dev/null || true; fi"
+        )
+    if dhcp:
+        ssh.exec_text(
+            f"if [ -s '{dhcp}' ]; then "
+            f"( uci import -q < '{dhcp}' && uci commit dhcp ) 2>/dev/null || true; "
+            f"/etc/init.d/dnsmasq restart 2>/dev/null || true; fi"
         )

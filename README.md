@@ -1,9 +1,10 @@
 # xiaomi-be7000-setup
 
-DevOps-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
+DevOps-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **AdGuard Home**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
 
 - устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
 - [Mihomo Dashboard](https://github.com/MetaCubeX/metacubexd) — интерфейс для мониторинга вашего Mihomo-клиента
+- [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) — DNS-фильтрация (реклама/трекинг/вредоносные домены) с автоматической интеграцией в `dnsmasq`
 - устанавливает Xray-сервер для того, чтобы вы могли подключаться к своему роутеру из внешней сети (например, со своего смартфона), используя роутер, как шлюз для Shadowsocks-прокси с маршрутизацией трафика
 - бонусом: устанавливает [TorrServer](https://github.com/yourok/torrserver) для просмотра торрентов в домашней сети в реальном времени, например, со SmartTV
 
@@ -19,15 +20,20 @@ DevOps-ориентированный конфигуратор для Xiaomi BE7
 flowchart TD
   UserClient["Клиенты (смартфон/ноутбук)\nVLESS-клиенты"] -->|"VLESS + Reality"| Xray
   LanDevices["Устройства в LAN\n(ТВ/Xbox/ПК)"] -->|"LAN-трафик"| Mihomo
+  LanDevices -->|"DNS"| Dnsmasq
+  Dnsmasq -->|"127.0.0.1:5353"| AdGuard
   SmartTV["Smart TV"] -->|"Стриминг торрентов"| Torr
   Torr -->|"UDP"| Direct["Прямой выход в интернет"]
 
   subgraph Router["Xiaomi BE7000 (Docker stack на USB)"]
     Xray["Xray server\n(vless inbound)"]
     Mihomo["mihomo\n(маршрутизация/правила)"]
+    AdGuard["AdGuard Home\n(DNS-фильтрация)"]
     Dashboard["metacubexd\n(dashboard)"]
+    Dnsmasq["dnsmasq\n(DHCP/DNS OpenWrt)"]
     Torr["TorrServer"]
     Xray --> Mihomo
+    AdGuard -->|"upstream DNS"| Mihomo
     Dashboard -. API .-> Mihomo
   end
 
@@ -56,7 +62,8 @@ poetry install
 
 ```bash
 cp config/router.example.yaml config/router.yaml
-# Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи, upstream для mihomo
+# Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи,
+# upstream для mihomo и секцию services.adguardhome
 ```
 
 Если у вашего роутера еще не настроен ssh, то воспользуйтесь инструкцией из [следующей секции](#ssh-с-нуля-xmir-patcher).
@@ -110,7 +117,7 @@ task setup-compose      # плагин docker compose на USB
 
 ### Деплой стека
 
-Команда копирует необходимые конфиги, скрипты с правилами маршрутизации, развертывает docker-контейнеры и проверяет работоспособность.
+Команда копирует необходимые конфиги, скрипты с правилами маршрутизации, развертывает docker-контейнеры, настраивает `dnsmasq -> AdGuard Home` через UCI и проверяет работоспособность.
 
 ```bash
 task deploy
@@ -123,7 +130,12 @@ poetry run xiaomi-router deploy
 - `--skip-smoke` — не запускать smoke-проверки после `docker compose up`.
 - `--no-rollback-on-smoke-fail` — если smoke не прошёл, завершить deploy ошибкой, но не выполнять `docker compose down` и rollback.
 
-Перед изменениями на USB создаётся архив в `$USB/backups/` и `uci export firewall`; по умолчанию при ошибке smoke выполняются `docker compose down`, затем откат файлов и импорт сохранённого `firewall`.
+Перед изменениями на USB создаётся архив в `$USB/backups/`, а также `uci export firewall` и `uci export dhcp`; по умолчанию при ошибке smoke выполняются `docker compose down`, затем откат файлов и импорт сохранённых `firewall`/`dhcp`.
+
+Доступные эндпоинты, после развертывания полного стека:
+- [http://192.168.31.1:3000](http://192.168.31.1:3000) — AdGuard
+- [http://192.168.31.1:9099](http://192.168.31.1:9099) — Mihomo Dashboard Metacube
+- [http://192.168.31.1:8090](http://192.168.31.1:8090/) — Torrserver
 
 ### Полезные команды
 
@@ -167,7 +179,21 @@ task rollback ./deploy-....json
 - `src/xiaomi_router/` — Python CLI
 - `third_party/xmir-patcher` — submodule
 
-На USB создаётся каталог `stack/` (имя задаётся в `stack.relative_dir`): `docker-compose.yml`, `configs/xray`, `configs/mihomo`, `mihomo/mihomo-routing.sh`. По умолчанию туда же разворачивается `metacubexd` (веб-дашборд Mihomo) на порту `9099` роутера.
+На USB создаётся каталог `stack/` (имя задаётся в `stack.relative_dir`): `docker-compose.yml`, `configs/xray`, `configs/mihomo`, `configs/adguardhome`, `mihomo/mihomo-routing.sh`. По умолчанию туда же разворачивается `metacubexd` (веб-дашборд Mihomo) на порту `9099` роутера.
+
+## AdGuard Home: настройка и рекомендации
+
+Проект разворачивает `AdGuard Home` как встроенный сервис (`services.adguardhome`) и автоматически переключает `dnsmasq` на локальный upstream `127.0.0.1#5353` (или ваш `services.adguardhome.dns_port`) во время `deploy`.
+
+### Фильтр-листы «из коробки» (актуально для текущей AGH)
+
+По текущим дефолтам в исходниках `AdGuard Home`:
+
+- `AdGuard DNS filter` включен по умолчанию;
+- `AdAway Default Blocklist` присутствует, но выключен.
+- `AdGuard Russian filter` присутствует, но выключен.
+
+В проекте эти же дефолты закладываются в рендер `configs/adguardhome/conf/AdGuardHome.yaml`.
 
 ## VLESS и «белый» IP
 

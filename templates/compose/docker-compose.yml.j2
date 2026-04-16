@@ -46,3 +46,15 @@ services:
   {{ service_name }}:
 {{ service_cfg | toyaml | indent(4, first=True) }}
 {% endfor %}
+{% set agh = services.adguardhome | default({}) %}
+{% if agh.enabled | default(true) %}
+
+  {{ agh.container_name | default("adguardhome") }}:
+    image: {{ agh.image | default("docker.io/adguard/adguardhome:latest") | tojson }}
+    container_name: {{ agh.container_name | default("adguardhome") | tojson }}
+    restart: unless-stopped
+    network_mode: {{ agh.network_mode | default("host") | tojson }}
+    volumes:
+      - "{{ agh.work_dir | default('./configs/adguardhome/work') }}:/opt/adguardhome/work"
+      - "{{ agh.conf_dir | default('./configs/adguardhome/conf') }}:/opt/adguardhome/conf"
+{% endif %}

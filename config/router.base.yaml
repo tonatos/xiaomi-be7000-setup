@@ -77,6 +77,52 @@ services:
     image: "gzxhwq/metacubexd:latest"
     # Внешний порт dashboard на роутере.
     port: 9099
+  adguardhome:
+    # Включить/выключить AdGuard Home.
+    enabled: true
+    # container_name для AdGuard Home.
+    container_name: "adguardhome"
+    # Образ AdGuard Home.
+    image: "docker.io/adguard/adguardhome:latest"
+    # Web UI для первичной и последующей настройки.
+    # Важно: не конфликтует с xray (443) и metacubexd (9099).
+    admin_port: 3000
+    # DNS-порт AdGuard Home для локального forward из dnsmasq.
+    # Оставляем не 53, т.к. 53 обычно занят dnsmasq на OpenWrt.
+    dns_port: 5353
+    # Порт HTTPS UI/DoH. По умолчанию выключен (0), чтобы не занимать 443.
+    https_port: 0
+    # Прокси для исходящих HTTP(S) запросов AdGuard Home (обновления фильтров, DoH upstream и т.д.).
+    # Поддерживаются схемы http/https/socks5. Официальная документация: https://github.com/AdguardTeam/AdGuardHome/wiki/Configuration
+    # Рекомендуемое значение для этого стека: "socks5://127.0.0.1:7890" (через mihomo).
+    http_proxy: "socks5://127.0.0.1:7890"
+    # Использовать host-network для корректного клиентского IP и простоты маршрутизации.
+    network_mode: "host"
+    # Директории внутри stack (относительно $USB/<stack.relative_dir>).
+    conf_dir: "./configs/adguardhome/conf"
+    work_dir: "./configs/adguardhome/work"
+    # Upstream DNS для AGH. Для этого проекта — цепочка в mihomo DNS.
+    # Формат соответствует официальной документации AGH.
+    upstream_dns:
+      # По умолчанию используем DoH по IP, чтобы:
+      # 1) не зависеть от mihomo fake-ip;
+      # 2) не требовать bootstrap_dns (обход бага AGH с сериализацией bootstrap_dns).
+      - "https://9.9.9.10/dns-query"
+      - "https://149.112.112.10/dns-query"
+    # Bootstrap DNS нужен для upstream по hostname (DoH/DoT).
+    # Для upstream по IP bootstrap не нужен.
+    # Если используете hostname upstream (например dns10.quad9.net), задайте bootstrap_dns.
+    bootstrap_dns: []
+    # Fallback DNS при проблемах с основными upstream.
+    fallback_dns: []
+    # Интервал обновления DNS-фильтров в часах (AGH default: 24).
+    filters_update_interval: 24
+    # Адреса, на которых AGH слушает DNS.
+    bind_hosts:
+      - "0.0.0.0"
+    # Ограничения доступа к DNS (рекомендуется ограничить вашей LAN).
+    allowed_clients: []
+    disallowed_clients: []
   # Пользовательские compose-сервисы (имя -> тело сервиса по Docker Compose spec).
   # Эти сервисы будут добавлены в общий docker-compose.yml как есть.
   # Smoke проверяет только встроенные сервисы проекта.
