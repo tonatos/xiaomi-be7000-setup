@@ -18,7 +18,7 @@ from xiaomi_router.render import render_all, render_local_preview
 from xiaomi_router.setup_extra import (
     setup_compose,
     setup_entware,
-    setup_opkg_usb,
+    setup_shell_env,
 )
 from xiaomi_router.smoke import run_smoke
 from xiaomi_router.ssh_util import RouterSSH
@@ -256,13 +256,13 @@ def cmd_diagnose(
     run_diagnose(cfg)
 
 
-@app.command("setup-opkg-usb")
-def cmd_setup_opkg(
+@app.command("setup-shell-env")
+def cmd_setup_shell_env(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),
 ) -> None:
     cfg = _load(config, secrets)
-    setup_opkg_usb(cfg)
+    setup_shell_env(cfg)
 
 
 @app.command("setup-entware")
@@ -279,7 +279,7 @@ def cmd_setup_compose(
     write_profile: bool = typer.Option(
         False,
         "--write-profile",
-        help="Добавить compose env в /etc/profile на роутере",
+        help="Добавить автоподхват USB env в /etc/profile на роутере",
     ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),

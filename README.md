@@ -3,13 +3,13 @@
 DevOps-ориентированный конфигуратор для Xiaomi BE7000 (прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
 
 - устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
-- [Mihomo Dashboard, The Official One, XD](https://github.com/MetaCubeX/metacubexd) — для мониторинга вашего Mihomo-клиента
+- [Mihomo Dashboard](https://github.com/MetaCubeX/metacubexd) — интерфейс для мониторинга вашего Mihomo-клиента
 - устанавливает Xray-сервер для того, чтобы вы могли подключаться к своему роутеру из внешней сети (например, со своего смартфона), используя роутер, как шлюз для Shadowsocks-прокси с маршрутизацией трафика
 - бонусом: устанавливает [TorrServer](https://github.com/yourok/torrserver) для просмотра торрентов в домашней сети в реальном времени, например, со SmartTV
 
 В итоге, ваш роутер сможет маршрутизировать трафик в домашней сети, обходя ограничения "с обоих сторон" (в том числе, сервисов, которые заблокировали доступ для российских пользователей) через Shadowsocks и проксируя напрямую весь отечественный трафик (банки, госсервисы). 
 
-Помимо этого, если у вас есть белый IP, вы можете настроить роутер как vless-сервер для подключения своих смартфонов, чтобы использовать настроенные правила маршрутизации без необходимости выключать proxy-клиент при использовании отечественных сервисов.
+Помимо этого, если у вас есть белый IP, вы можете настроить роутер как Xray-сервер для подключения своих смартфонов, чтобы использовать настроенные правила маршрутизации без необходимости выключать proxy-клиент при использовании отечественных сервисов.
 
 В качестве зависимости, конфигуратор использует [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (эксплойт/доступ к устройству и постоянный dropbear) для получения ssh-доступа к роутере.
 
@@ -20,6 +20,7 @@ flowchart TD
   UserClient["Клиенты (смартфон/ноутбук)\nVLESS-клиенты"] -->|"VLESS + Reality"| Xray
   LanDevices["Устройства в LAN\n(ТВ/Xbox/ПК)"] -->|"LAN-трафик"| Mihomo
   SmartTV["Smart TV"] -->|"Стриминг торрентов"| Torr
+  Torr -->|"UDP"| Direct["Прямой выход в интернет"]
 
   subgraph Router["Xiaomi BE7000 (Docker stack на USB)"]
     Xray["Xray server\n(vless inbound)"]
@@ -58,6 +59,8 @@ cp config/router.example.yaml config/router.yaml
 # Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи, upstream для mihomo
 ```
 
+Если у вашего роутера еще не настроен ssh, то воспользуйтесь инструкцией из [следующей секции](#ssh-с-нуля-xmir-patcher).
+
 `config/router.base.yaml` подгружается автоматически, а `config/router.yaml` переопределяет любые его поля.
 
 Для добавления собственных контейнеров используйте `services.custom` в `router.yaml`:
@@ -85,27 +88,29 @@ poetry run xiaomi-router bootstrap-ssh
 По желанию, с рабочего SSH:
 
 ```bash
-task setup-opkg-usb
+task setup-shell-env    # shell PATH (docker / compose / opkg, если доступны)
 task setup-entware      # опционально, Entware в bind-mount /opt на USB
 task setup-compose      # плагин docker compose на USB + опционально --write-profile
 ```
 
 Что это значит:
 
-- `setup-opkg-usb` — подготавливает служебную инфраструктуру на USB для пакетного менеджера роутера (`opkg`): конфиг, кеш, обертку и переменные окружения.  
-  Полезно, если хотите, чтобы служебные данные жили на USB, а не во внутренней памяти роутера.
-- `setup-entware` — устанавливает Entware на USB (дополнительная экосистема Linux-пакетов в `/opt`).  
+- `setup-shell-env` — создаёт `/mnt/usb-*/opt/usb-env.sh` и idempotent-хук в `/etc/profile`, чтобы при каждом SSH-логине автоматически подхватывались `docker` / `docker compose` / `opkg` (если доступны в системе).
+- `setup-entware` — устанавливает Entware на USB (дополнительная экосистема Linux-пакетов в `/opt`) и сохраняет wrapper `opkg-usb` для штатного `/bin/opkg` роутера в `$USB/opt/bin/opkg-usb`.  
   Это отдельная "мини-система" с собственным набором пакетов и утилит.
 
 Когда что запускать:
 
 - Если нужен только деплой этого проекта, начните с `task deploy`: он сам проверит `docker compose` и при необходимости установит его.
-- `setup-opkg-usb` и `setup-entware` нужны не всем. Их имеет смысл запускать, когда вы осознанно хотите расширять роутер пакетами и инструментами.
+- `setup-shell-env` полезен почти всегда, если вы регулярно заходите на роутер по SSH.
+- `setup-entware` нужен, когда вам действительно нужны пакеты Entware (`/opt/bin/opkg` и экосистема `/opt`).
 
-`task deploy` теперь сам проверяет наличие `docker compose` на роутере.  
+`task deploy` сам подготавливает shell env (`usb-env.sh` + `/etc/profile` hook) и проверяет наличие `docker compose` на роутере.  
 Если compose отсутствует, запускается автоустановка (`setup-compose`), а при неуспехе — попытка `setup-entware` и повторная установка compose.
 
 ### Деплой стека
+
+Команда копирует необходимые конфиги, скрипты с правилами маршрутизации, развертывает docker-контейнеры и проверяет работоспособность.
 
 ```bash
 task deploy
@@ -135,7 +140,7 @@ poetry run xiaomi-router deploy
 | `task rollback -- path/to/deploy-....json` | Откат по метаданным deploy (JSON с роутера) |
 | `task diagnose` | Сводка по состоянию `mi_docker` / USB |
 | `task vless-link` | Напечатать VLESS (Reality) ссылку для клиента |
-| `task setup-opkg-usb` | Подготовить `opkg-usb` и `usb-env.sh` на USB |
+| `task setup-shell-env` | Настроить `usb-env.sh` и автоподхват env в SSH (`/etc/profile`) |
 | `task setup-entware` | Установить Entware на USB (`/opt` через bind mount) |
 | `task setup-compose` | Установить compose plugin в `$USB/opt/docker-cli` |
 
@@ -166,7 +171,9 @@ task rollback ./deploy-....json
 
 ## VLESS и «белый» IP
 
-Команда `vless-link` строит ссылку из `public_endpoint.host` (или `--host`) и секретов Reality. Для доступа **из интернета** нужны:
+Вы можете использовать ваш роутер как Xray-сервер для внешних клиентов (например, смартфонов) для того, чтобы маршрутизировать трафик по правилам, сконфигурированным в `Mihomo` (в частности, отправлять запросы к ресурсам с ограничениями через зарубежный proxy-сервер). В качестве клиента можно использовать любой, который поддерживает Vless (Hiddify, V2RayTun, Happ, etc.)
+
+Команда `vless-link` строит ссылку из `public_endpoint.host` (или `--host`) и секретов Reality для подключения. Для доступа **из интернета** нужны:
 
 - проброс порта с WAN на хост роутера (порт inbound Xray, по умолчанию 443);
 - у провайдера — публичный («белый») IP или статический адрес на вашем VPS, если вы выкладываете трафик иначе.
@@ -175,11 +182,11 @@ task rollback ./deploy-....json
 
 ## Прозрачный прокси (iptables)
 
-В `router.yaml` секция `routing.apply_iptables` по умолчанию `false`. Включайте только понимая последствия для вашей LAN (`routing.lan_cidr`).
+По умолчанию, весь трафик вашей **не будет** маршрутизироваться в прокси-клиент `Mihomo`, в `router.yaml` секция `routing.apply_iptables` по умолчанию `false`. Чтобы, маршутизировать трафик внутри сети согаласно вашим правилам, ее необходимо включить. Включайте только понимая последствия для вашей LAN (`routing.lan_cidr`).
 
 ## Ограничения Xiaomi Docker
 
-Тома и проект Compose должны находиться под путями вида `/mnt/usb-*/…`.
+Тома и проект Compose должны находиться под путями вида `/mnt/usb-*/…`. В случае, если docker-контейнеры будут ссылаться на пути за пределами `/mnt/usb-*/…`, роутер не запустит docker-демон при перезагрузке.
 
 ## Лицензия
 

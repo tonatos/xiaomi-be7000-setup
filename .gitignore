@@ -11,7 +11,6 @@ build/synced-from-router/
 
 # Секреты и локальные данные
 config/router.yaml
-config/router.secrets.yaml
 local/
 
 # IDE

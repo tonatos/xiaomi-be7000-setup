@@ -68,14 +68,17 @@ tasks:
     cmds:
       - "{{.PY}} -m xiaomi_router diagnose"
 
-  setup-opkg-usb:
+  setup-shell-env:
+    desc: Настроить shell env на USB и автоподхват в SSH
     cmds:
-      - "{{.PY}} -m xiaomi_router setup-opkg-usb"
+      - "{{.PY}} -m xiaomi_router setup-shell-env"
 
   setup-entware:
+    desc: Установить Entware и сохранить wrapper штатного opkg
     cmds:
       - "{{.PY}} -m xiaomi_router setup-entware"
 
   setup-compose:
+    desc: Установить docker compose plugin на USB
     cmds:
       - "{{.PY}} -m xiaomi_router setup-compose"

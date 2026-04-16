@@ -10,7 +10,7 @@ from xiaomi_router.backup import create_backup, rollback
 from xiaomi_router.config_loader import require_router_password
 from xiaomi_router.paths import rendered_dir
 from xiaomi_router.render import render_all
-from xiaomi_router.setup_extra import ensure_compose_with_optional_entware
+from xiaomi_router.setup_extra import ensure_compose_with_optional_entware, ensure_usb_shell_env
 from xiaomi_router.smoke import run_smoke
 from xiaomi_router.ssh_util import RouterSSH
 
@@ -168,6 +168,7 @@ def deploy(
         log("[5/6] Применение UCI firewall и перезапуск docker...")
         apply_uci_firewall_and_docker_fix(ssh, cfg)
         apply_docker_registry_mirrors(ssh, cfg, log=log)
+        ensure_usb_shell_env(ssh, usb, log=log)
         ensure_compose_with_optional_entware(ssh, usb, log=log)
 
         env = _remote_compose_env(usb)
