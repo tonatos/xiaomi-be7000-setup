@@ -83,6 +83,22 @@ def _as_flat_str_list(value: Any, default: list[str]) -> list[str]:
     return out or default
 
 
+def _validate_rendered_text(rel_out: str, content: str) -> None:
+    """Проверка синтаксиса JSON/YAML после Jinja (до записи на диск)."""
+    suf = Path(rel_out).suffix.lower()
+    if suf == ".json":
+        try:
+            json.loads(content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"После рендера {rel_out}: невалидный JSON ({e})") from e
+        return
+    if suf in (".yaml", ".yml"):
+        try:
+            list(yaml.safe_load_all(content))
+        except yaml.YAMLError as e:
+            raise ValueError(f"После рендера {rel_out}: невалидный YAML ({e})") from e
+
+
 def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     stack_rel = cfg.get("stack", {}).get("relative_dir", "stack")
     stack_path = f"{usb_mount}/{stack_rel}".replace("//", "/")
@@ -145,15 +161,14 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
     env = _jinja_env()
 
     def w(rel_out: str, content: str) -> None:
+        _validate_rendered_text(rel_out, content)
         p = out / rel_out
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
 
     # xray
     tpl = env.get_template("xray/config.json.j2")
-    xray_json = tpl.render(**ctx)
-    json.loads(xray_json)  # validate
-    w("configs/xray/config.json", xray_json)
+    w("configs/xray/config.json", tpl.render(**ctx))
 
     # mihomo
     tpl = env.get_template("mihomo/config.yaml.j2")

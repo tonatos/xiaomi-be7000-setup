@@ -66,24 +66,28 @@ def cmd_render(
 ) -> None:
     """Сгенерировать файлы в build/rendered."""
     cfg = _load(config, secrets)
-    if discover:
-        pwd = require_router_password(cfg)
-        r = cfg["router"]
-        ssh = RouterSSH(
-            host=str(r["host"]),
-            password=pwd,
-            port=int(r.get("ssh_port", 22)),
-            username=str(r.get("ssh_user", "root")),
-        )
-        try:
-            usb = ssh.usb_mount_from_router(cfg.get("usb", {}).get("mount_path"))
-            out = render_all(cfg, usb)
-        finally:
-            ssh.close()
-        typer.echo(out)
-    else:
-        out = render_local_preview(cfg, usb_placeholder)
-        typer.echo(out)
+    try:
+        if discover:
+            pwd = require_router_password(cfg)
+            r = cfg["router"]
+            ssh = RouterSSH(
+                host=str(r["host"]),
+                password=pwd,
+                port=int(r.get("ssh_port", 22)),
+                username=str(r.get("ssh_user", "root")),
+            )
+            try:
+                usb = ssh.usb_mount_from_router(cfg.get("usb", {}).get("mount_path"))
+                out = render_all(cfg, usb)
+            finally:
+                ssh.close()
+            typer.echo(out)
+        else:
+            out = render_local_preview(cfg, usb_placeholder)
+            typer.echo(out)
+    except ValueError as e:
+        typer.echo(typer.style(str(e), fg=typer.colors.RED), err=True)
+        raise typer.Exit(1) from e
 
 
 @app.command("deploy")
