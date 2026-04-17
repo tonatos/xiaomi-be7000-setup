@@ -95,7 +95,11 @@ services:
     # Прокси для исходящих HTTP(S) запросов AdGuard Home (обновления фильтров, DoH upstream и т.д.).
     # Поддерживаются схемы http/https/socks5. Официальная документация: https://github.com/AdguardTeam/AdGuardHome/wiki/Configuration
     # Рекомендуемое значение для этого стека: "socks5://127.0.0.1:7890" (через mihomo).
+    # При services.mihomo.enabled: false поле http_proxy в AdGuardHome.yaml не задаётся
+    # (исходящие запросы AGH идут напрямую), иначе обновления фильтров/DoH упираются в мёртвый SOCKS.
+    # Чтобы всё же форсировать прокси без mihomo (внешний HTTP-прокси и т.п.): http_proxy_ignore_mihomo_state: true.
     http_proxy: "socks5://127.0.0.1:7890"
+    http_proxy_ignore_mihomo_state: false
     # Использовать host-network для корректного клиентского IP и простоты маршрутизации.
     network_mode: "host"
     # Директории внутри stack (относительно $USB/<stack.relative_dir>).
@@ -323,8 +327,6 @@ mihomo:
     - RULE-SET,refilter_domains,Proxy
     # Применять IP-правила re:filter через группу Proxy.
     - RULE-SET,refilter_ips,Proxy
-    # Проксировать geosite category-porn.
-    - GEOSITE,category-porn,Proxy
     # Проксировать geosite category-ai-!cn.
     - GEOSITE,category-ai-!cn,Proxy
     # Трафик в CN направлять напрямую.

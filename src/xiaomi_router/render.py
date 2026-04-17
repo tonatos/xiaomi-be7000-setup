@@ -107,6 +107,11 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     sm = cfg.get("services", {}).get("mihomo", {})
     sd = cfg.get("services", {}).get("metacubexd", {})
     sa = cfg.get("services", {}).get("adguardhome", {})
+    mihomo_enabled = bool(sm.get("enabled", True))
+    agh_http_proxy = str(sa.get("http_proxy", "") or "").strip()
+    if agh_http_proxy and not mihomo_enabled:
+        if not bool(sa.get("http_proxy_ignore_mihomo_state", False)):
+            agh_http_proxy = ""
     router_host = str(cfg.get("router", {}).get("host", "192.168.31.1")).strip() or "192.168.31.1"
     mihomo_controller_port = _extract_mihomo_controller_port(cfg)
     return {
@@ -142,7 +147,7 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
             sa.get("bind_hosts"),
             default=["0.0.0.0"],
         ),
-        "services_adguardhome_http_proxy": str(sa.get("http_proxy", "") or "").strip(),
+        "services_adguardhome_http_proxy": agh_http_proxy,
         "services_adguardhome_allowed_clients": _as_flat_str_list(
             sa.get("allowed_clients"),
             default=[],

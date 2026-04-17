@@ -28,6 +28,8 @@ services:
   adguardhome:
     # Включить AdGuard Home.
     enabled: true
+    # При services.mihomo.enabled: false http_proxy для AGH не подставляется (прямой выход в интернет).
+    # Нужен прокси без mihomo — задайте http_proxy и http_proxy_ignore_mihomo_state: true.
     # DNS-порт AGH для форвардинга из dnsmasq.
     dns_port: 5353
     # Порт web UI (первичный wizard и админка).
