@@ -37,6 +37,31 @@ def _startup_paths(cfg: dict[str, Any]) -> tuple[str, str]:
     return base, f"{base.rstrip('/')}/{sub}"
 
 
+def ensure_opa_docker_authz_disabled(ssh: RouterSSH) -> bool:
+    """Убрать opa-docker-authz из UCI mi_docker (policy denied без этого).
+
+    Перезапуск mi_docker выполняется только если в конфиге ещё указан плагин.
+    Возвращает True, если демон трогали (restart/start для применения правки).
+    """
+    _, probe, _ = ssh.exec(
+        "grep -q 'list authorization_plugins' /etc/config/mi_docker 2>/dev/null && "
+        "grep -q 'opa-docker-authz' /etc/config/mi_docker 2>/dev/null && "
+        "echo NEED || true"
+    )
+    if "NEED" not in probe:
+        return False
+
+    ssh.exec_text(
+        "sed -i "
+        "-e \"s/list authorization_plugins 'opa-docker-authz'/list authorization_plugins ''/\" "
+        "-e 's/list authorization_plugins \"opa-docker-authz\"/list authorization_plugins \"\"/g' "
+        "/etc/config/mi_docker"
+    )
+    ssh.exec_text(
+        "/etc/init.d/mi_docker restart 2>/dev/null || /etc/init.d/mi_docker start 2>/dev/null || true"
+    )
+    return True
+
 
 def apply_uci_firewall_and_docker_fix(ssh: RouterSSH, cfg: dict[str, Any]) -> None:
     startup_base, _ = _startup_paths(cfg)
@@ -51,13 +76,9 @@ def apply_uci_firewall_and_docker_fix(ssh: RouterSSH, cfg: dict[str, Any]) -> No
     ]
     ssh.exec_text("; ".join(cmds))
 
-    ssh.exec_text(
-        r"grep -q \"list authorization_plugins 'opa-docker-authz'\" /etc/config/mi_docker 2>/dev/null && "
-        r"sed -i \"s/list authorization_plugins 'opa-docker-authz'/list authorization_plugins ''/\" "
-        r"/etc/config/mi_docker || true"
-    )
-
-    ssh.exec_text("/etc/init.d/mi_docker start 2>/dev/null || true")
+    opa_restarted = ensure_opa_docker_authz_disabled(ssh)
+    if not opa_restarted:
+        ssh.exec_text("/etc/init.d/mi_docker start 2>/dev/null || true")
 
 
 def apply_docker_registry_mirrors(
@@ -359,6 +380,7 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         )
         ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
         ssh.upload_file(out / "mihomo/rollback.sh", f"{stack}/mihomo/rollback.sh", mode=0o755)
+        ensure_opa_docker_authz_disabled(ssh)
         ensure_compose_with_optional_entware(ssh, usb)
         env = remote_compose_env(usb)
         ssh.exec_text(f"{env}; cd '{stack}' && docker compose up -d 2>&1")
