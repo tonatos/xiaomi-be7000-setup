@@ -193,7 +193,13 @@ def validate_merged_config_for_deploy(cfg: dict[str, Any]) -> None:
                         errs.append(
                             f"mihomo.proxies[{i}]: каждый элемент должен быть объектом (mapping)"
                         )
-                        break
+                        continue
+                    server = item.get("server")
+                    if not isinstance(server, str) or not server.strip():
+                        errs.append(
+                            f"mihomo.proxies[{i}]: задайте непустой server (адрес upstream-прокси); "
+                            "см. закомментированный пример в config/router.example.yaml"
+                        )
 
     ts = sv.get("torrserver", {})
     t_en = bool(ts.get("enabled", True)) if isinstance(ts, dict) else True

@@ -74,17 +74,16 @@ routing:
   excluded_ips: []
 
 mihomo:
-  # Настройка upstream-прокси для mihomo (Vless / Vmess / Trojan / Shadowsocks).
-  # Заполняйте в соответствии с документацией https://wiki.metacubex.one/ru/config/proxies/.
-  # Пример:
+  # Обязательно раскомментируйте и заполните proxies (реальный server и учётные данные).
+  # Пока секции нет — после merge остаётся заглушка из router.base.yaml (server: "") и deploy не пройдёт проверку.
+  # Документация: https://wiki.metacubex.one/ru/config/proxies/
   # proxies:
   #   - name: "upstream"
   #     type: ss
   #     server: "77.111.111.111"
   #     port: 34414
   #     cipher: chacha20-ietf-poly1305
-  #     password: "YOU_PASSWORD"
+  #     password: "YOUR_PASSWORD"
   #     udp: true
-  proxies: []
   # API-секрет external-controller (для metacubexd), пусто = без авторизации.
   secret: ""
