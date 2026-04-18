@@ -169,6 +169,32 @@ def validate_merged_config_for_deploy(cfg: dict[str, Any]) -> None:
             ],
         )
 
+    if m_en:
+        mihomo_cfg = cfg.get("mihomo")
+        if not isinstance(mihomo_cfg, dict):
+            errs.append(
+                "mihomo: ожидается объект конфигурации при включённом services.mihomo"
+            )
+        elif "proxies" not in mihomo_cfg:
+            errs.append(
+                "mihomo: задайте секцию proxies (список outbound-прокси, см. router.example.yaml)"
+            )
+        else:
+            proxies = mihomo_cfg["proxies"]
+            if not isinstance(proxies, list):
+                errs.append("mihomo.proxies: ожидается список (YAML sequence)")
+            elif len(proxies) == 0:
+                errs.append(
+                    "mihomo.proxies: нужен хотя бы один прокси; пустой список недопустим"
+                )
+            else:
+                for i, item in enumerate(proxies):
+                    if not isinstance(item, dict):
+                        errs.append(
+                            f"mihomo.proxies[{i}]: каждый элемент должен быть объектом (mapping)"
+                        )
+                        break
+
     ts = sv.get("torrserver", {})
     t_en = bool(ts.get("enabled", True)) if isinstance(ts, dict) else True
     if isinstance(ts, dict):

@@ -13,21 +13,21 @@ router:
   ssh_password: "change-me"
 
 services:
-  xray_server:
-    # Включить Xray-сервер.
-    enabled: true
   mihomo:
     # Включить mihomo-клиент.
-    enabled: true
-  torrserver:
-    # Включить TorrServer.
     enabled: true
   metacubexd:
     # Включить web-dashboard metacubexd.
     enabled: true
+  xray_server:
+    # Включить Xray-сервер.
+    enabled: false
+  torrserver:
+    # Включить TorrServer.
+    enabled: false
   adguardhome:
     # Включить контейнер AdGuard Home в compose.
-    enabled: true
+    enabled: false
   # Опционально: добавьте собственные сервисы в общий docker-compose.
   # Формат каждого элемента — как в Docker Compose services.<name>.
   # custom:
@@ -74,21 +74,17 @@ routing:
   excluded_ips: []
 
 mihomo:
-  # Настройка upstream-прокси для mihomo (пример Shadowsocks).
-  proxies:
-    - # Имя прокси, используется в proxy-groups/rules.
-      name: "upstream"
-      # Тип прокси (ss/vless/vmess/trojan/...).
-      type: ss
-      # Адрес upstream сервера.
-      server: ""
-      # Порт upstream сервера.
-      port: 443
-      # Cipher Shadowsocks.
-      cipher: chacha20-ietf-poly1305
-      # Пароль Shadowsocks.
-      password: ""
-      # Включение UDP для Shadowsocks outbound.
-      udp: false
+  # Настройка upstream-прокси для mihomo (Vless / Vmess / Trojan / Shadowsocks).
+  # Заполняйте в соответствии с документацией https://wiki.metacubex.one/ru/config/proxies/.
+  # Пример:
+  # proxies:
+  #   - name: "upstream"
+  #     type: ss
+  #     server: "77.111.111.111"
+  #     port: 34414
+  #     cipher: chacha20-ietf-poly1305
+  #     password: "YOU_PASSWORD"
+  #     udp: true
+  proxies: []
   # API-секрет external-controller (для metacubexd), пусто = без авторизации.
   secret: ""

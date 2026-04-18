@@ -63,7 +63,7 @@ poetry install
 ```bash
 cp config/router.example.yaml config/router.yaml
 # Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи,
-# upstream для mihomo и секцию adguardhome (приложение AGH; контейнер — services.adguardhome)
+# upstream для mihomo и секцию adguardhome
 ```
 
 Если у вашего роутера еще не настроен ssh, то воспользуйтесь инструкцией из [следующей секции](#ssh-с-нуля-xmir-patcher).
@@ -75,7 +75,7 @@ cp config/router.example.yaml config/router.yaml
 `services.<name>` из Docker Compose. Smoke-проверки по умолчанию выполняются только
 для встроенных сервисов проекта.
 
-Укажите данные вашего proxy-сервера в секции `mihomo.proxies` файла `config/router.yaml`. Вот пример для Shadowsocks ghjnj:
+Укажите данные вашего proxy-сервера в секции `mihomo.proxies` файла `config/router.yaml`. Вот пример для Shadowsocks прокси:
 ```
 proxies:
   - name: "upstream"
@@ -88,7 +88,7 @@ proxies:
     ip-version: ipv4
 ```
 
-Настройки указывать в соответствии с документацией [Mihomo](https://wiki.metacubex.one/ru/config/proxies/).
+Настройки указывать в соответствии с документацией [Mihomo Proxies](https://wiki.metacubex.one/ru/config/proxies/).
 
 Переменные окружения (перекрывают YAML): `ROUTER_HOST`, `ROUTER_SSH_PASSWORD`, `ROUTER_SSH_PORT`, `ROUTER_SSH_USER`, `ROUTER_PUBLIC_HOST`.
 
