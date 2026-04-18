@@ -106,11 +106,12 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     startup = cfg.get("startup", {})
     sm = cfg.get("services", {}).get("mihomo", {})
     sd = cfg.get("services", {}).get("metacubexd", {})
-    sa = cfg.get("services", {}).get("adguardhome", {})
+    _agh = cfg.get("adguardhome")
+    agh_app = _agh if isinstance(_agh, dict) else {}
     mihomo_enabled = bool(sm.get("enabled", True))
-    agh_http_proxy = str(sa.get("http_proxy", "") or "").strip()
+    agh_http_proxy = str(agh_app.get("http_proxy", "") or "").strip()
     if agh_http_proxy and not mihomo_enabled:
-        if not bool(sa.get("http_proxy_ignore_mihomo_state", False)):
+        if not bool(agh_app.get("http_proxy_ignore_mihomo_state", False)):
             agh_http_proxy = ""
     router_host = str(cfg.get("router", {}).get("host", "192.168.31.1")).strip() or "192.168.31.1"
     mihomo_controller_port = _extract_mihomo_controller_port(cfg)
@@ -128,32 +129,32 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
             "default_backend_url",
             f"http://{router_host}:{mihomo_controller_port}",
         ),
-        "services_adguardhome_dns_port": sa.get("dns_port", 5353),
-        "services_adguardhome_admin_port": sa.get("admin_port", 3000),
-        "services_adguardhome_upstream_dns": _as_flat_str_list(
-            sa.get("upstream_dns"),
+        "adguardhome_dns_port": agh_app.get("dns_port", 5353),
+        "adguardhome_admin_port": agh_app.get("admin_port", 3000),
+        "adguardhome_upstream_dns": _as_flat_str_list(
+            agh_app.get("upstream_dns"),
             default=["https://9.9.9.10/dns-query", "https://149.112.112.10/dns-query"],
         ),
-        "services_adguardhome_bootstrap_dns": _as_flat_str_list(
-            sa.get("bootstrap_dns"),
+        "adguardhome_bootstrap_dns": _as_flat_str_list(
+            agh_app.get("bootstrap_dns"),
             default=[],
         ),
-        "services_adguardhome_fallback_dns": _as_flat_str_list(
-            sa.get("fallback_dns"),
+        "adguardhome_fallback_dns": _as_flat_str_list(
+            agh_app.get("fallback_dns"),
             default=[],
         ),
-        "services_adguardhome_filters_update_interval": sa.get("filters_update_interval", 24),
-        "services_adguardhome_bind_hosts": _as_flat_str_list(
-            sa.get("bind_hosts"),
+        "adguardhome_filters_update_interval": agh_app.get("filters_update_interval", 24),
+        "adguardhome_bind_hosts": _as_flat_str_list(
+            agh_app.get("bind_hosts"),
             default=["0.0.0.0"],
         ),
-        "services_adguardhome_http_proxy": agh_http_proxy,
-        "services_adguardhome_allowed_clients": _as_flat_str_list(
-            sa.get("allowed_clients"),
+        "adguardhome_http_proxy": agh_http_proxy,
+        "adguardhome_allowed_clients": _as_flat_str_list(
+            agh_app.get("allowed_clients"),
             default=[],
         ),
-        "services_adguardhome_disallowed_clients": _as_flat_str_list(
-            sa.get("disallowed_clients"),
+        "adguardhome_disallowed_clients": _as_flat_str_list(
+            agh_app.get("disallowed_clients"),
             default=[],
         ),
     }

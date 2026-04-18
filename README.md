@@ -63,7 +63,7 @@ poetry install
 ```bash
 cp config/router.example.yaml config/router.yaml
 # Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи,
-# upstream для mihomo и секцию services.adguardhome
+# upstream для mihomo и секцию adguardhome (приложение AGH; контейнер — services.adguardhome)
 ```
 
 Если у вашего роутера еще не настроен ssh, то воспользуйтесь инструкцией из [следующей секции](#ssh-с-нуля-xmir-patcher).
@@ -74,6 +74,21 @@ cp config/router.example.yaml config/router.yaml
 каждый элемент этой секции вставляется в общий `docker-compose.yml` как обычный
 `services.<name>` из Docker Compose. Smoke-проверки по умолчанию выполняются только
 для встроенных сервисов проекта.
+
+Укажите данные вашего proxy-сервера в секции `mihomo.proxies` файла `config/router.yaml`. Вот пример для Shadowsocks ghjnj:
+```
+proxies:
+  - name: "upstream"
+    type: ss                        # тип прокси (vless/shadowsocks)
+    server: 77.111.111.111          # IP вашего сервера
+    port: 34414                     # порт
+    cipher: chacha20-ietf-poly1305  # cipher
+    password: "YOU_PASSWORD"        # пароль
+    udp: true
+    ip-version: ipv4
+```
+
+Настройки указывать в соответствии с документацией [Mihomo](https://wiki.metacubex.one/ru/config/proxies/).
 
 Переменные окружения (перекрывают YAML): `ROUTER_HOST`, `ROUTER_SSH_PASSWORD`, `ROUTER_SSH_PORT`, `ROUTER_SSH_USER`, `ROUTER_PUBLIC_HOST`.
 
@@ -183,7 +198,7 @@ task rollback ./deploy-....json
 
 ## AdGuard Home: настройка и рекомендации
 
-Проект разворачивает `AdGuard Home` как встроенный сервис (`services.adguardhome`) и автоматически переключает `dnsmasq` на локальный upstream `127.0.0.1#5353` (или ваш `services.adguardhome.dns_port`) во время `deploy`.
+Проект разворачивает контейнер `AdGuard Home` (`services.adguardhome`) и конфиг приложения в секции `adguardhome` (порты, upstream DNS, прокси и т.д.). При `deploy` `dnsmasq` переключается на локальный upstream `127.0.0.1#5353` (или `adguardhome.dns_host`/`adguardhome.dns_port`).
 
 ### Фильтр-листы «из коробки» (актуально для текущей AGH)
 

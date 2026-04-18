@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ def _check_internet(ssh: RouterSSH) -> tuple[bool, str]:
     """Проверяет IP-связность с интернетом через ping до 1.1.1.1."""
     _, out, _ = ssh.exec("ping -c2 -W3 1.1.1.1 >/dev/null 2>&1 && echo OK || echo FAIL")
     ok = "OK" in (out.strip().splitlines()[-1] if out.strip() else "FAIL")
-    return ok, f"internet (ping 1.1.1.1) -> {'OK' if ok else 'FAIL'}"
+    return ok, f"[сеть] internet (ping 1.1.1.1) -> {'OK' if ok else 'FAIL'}"
 
 
 def _check_dns(ssh: RouterSSH) -> tuple[bool, str]:
@@ -31,42 +32,106 @@ def _check_dns(ssh: RouterSSH) -> tuple[bool, str]:
         "fi"
     )
     ok = "OK" in (out.strip().splitlines()[-1] if out.strip() else "FAIL")
-    return ok, f"dns (one.one.one.one) -> {'OK' if ok else 'FAIL'}"
+    return ok, f"[сеть] dns (one.one.one.one) -> {'OK' if ok else 'FAIL'}"
 
 
-def _check_tcp(ssh: RouterSSH, host: str, port: int) -> tuple[bool, str]:
+def _check_tcp(
+    ssh: RouterSSH,
+    host: str,
+    port: int,
+    *,
+    service_label: str | None = None,
+) -> tuple[bool, str]:
     script = (
         f"netstat -tln 2>/dev/null | grep -Eq '[:.]({port})\\b' "
         "&& echo OK || echo FAIL"
     )
     _, out, _ = ssh.exec(script)
     line = out.strip().splitlines()[-1] if out.strip() else "FAIL"
-    return ("OK" in line), f"tcp {host}:{port} -> {line}"
+    prefix = f"[{service_label}] " if service_label else ""
+    return ("OK" in line), f"{prefix}tcp {host}:{port} -> {line}"
 
 
 def _wait_tcp(
     ssh: RouterSSH,
     host: str,
     port: int,
-    timeout_s: int = 30,
+    timeout_s: int = 10,
     interval_s: int = 3,
     log: Callable[[str], None] | None = None,
+    *,
+    service_label: str | None = None,
 ) -> tuple[bool, str]:
+    prefix = f"[{service_label}] " if service_label else ""
     if log is not None:
-        log(f"проверка tcp {host}:{port} (таймаут {timeout_s}s)")
+        log(f"{prefix}проверка tcp {host}:{port} (таймаут {timeout_s}s)")
     deadline = time.time() + timeout_s
     last_msg = "FAIL"
     started = time.time()
     while time.time() < deadline:
-        ok, msg = _check_tcp(ssh, host, port)
+        ok, msg = _check_tcp(ssh, host, port, service_label=service_label)
         last_msg = msg
         if ok:
             return True, f"{msg} (ready)"
         if log is not None:
             elapsed = int(time.time() - started)
-            log(f"ожидание tcp {host}:{port}... {elapsed}/{timeout_s}s")
+            log(f"{prefix}ожидание tcp {host}:{port}... {elapsed}/{timeout_s}s")
         time.sleep(interval_s)
     return False, f"{last_msg} (timeout {timeout_s}s)"
+
+
+def _tail_container_logs(ssh: RouterSSH, container_name: str, tail: int = 30) -> str:
+    """
+    Пытается получить последние строки docker logs с роутера.
+    Используется как диагностика при падении smoke.
+    """
+    cn = shlex.quote(container_name)
+    script = (
+        "D=$(ls /mnt/usb*/mi_docker/docker-binaries/docker 2>/dev/null | head -1); "
+        "if [ -x \"$D\" ]; then "
+        f"  \"$D\" logs --tail {int(tail)} {cn} 2>&1 || true; "
+        "else echo NO_DOCKER_BIN; fi"
+    )
+    _, out, _ = ssh.exec(script)
+    return out.strip()
+
+
+def _container_state_hint(ssh: RouterSSH, container_name: str) -> str:
+    """Краткий статус контейнера (docker ps -a / inspect) для локализации сбоя."""
+    qc = shlex.quote(container_name)
+    script = (
+        "D=$(ls /mnt/usb*/mi_docker/docker-binaries/docker 2>/dev/null | head -1); "
+        "if [ ! -x \"$D\" ]; then echo NO_DOCKER_BIN; exit 0; fi; "
+        f"C={qc}; "
+        f"\"$D\" ps -a --filter name=\"$C\" --format '{{{{.Names}}}}\\t{{{{.Status}}}}' 2>&1 | head -6; "
+        "echo '---'; "
+        f"\"$D\" inspect -f 'status={{{{.State.Status}}}} exit={{{{.State.ExitCode}}}} "
+        f"oom={{{{.State.OOMKilled}}}} err={{{{.State.Error}}}}' \"$C\" 2>&1 | head -3"
+    )
+    _, out, _ = ssh.exec(script)
+    return out.strip()
+
+
+def _append_container_diagnostics(
+    ssh: RouterSSH,
+    service_label: str,
+    container_name: str,
+    msgs: list[str],
+    diagnosed: set[str],
+) -> None:
+    if container_name in diagnosed:
+        return
+    diagnosed.add(container_name)
+    hint = _container_state_hint(ssh, container_name)
+    if hint and hint != "NO_DOCKER_BIN":
+        msgs.append(
+            f"[{service_label}] состояние контейнера {container_name}:\n{hint}"
+        )
+    logs = _tail_container_logs(ssh, container_name)
+    if logs:
+        msgs.append(
+            f"[{service_label}] docker logs {container_name} (tail):\n{logs}"
+        )
 
 
 def run_smoke(
@@ -76,8 +141,11 @@ def run_smoke(
 ) -> SmokeResult:
     msgs: list[str] = []
     ok_all = True
+    diagnosed_containers: set[str] = set()
 
     services = cfg.get("services", {})
+    _agh = cfg.get("adguardhome")
+    agh_app = _agh if isinstance(_agh, dict) else {}
 
     _, out, _ = ssh.exec(
         "D=$(ls /mnt/usb*/mi_docker/docker-binaries/docker 2>/dev/null | head -1); "
@@ -89,80 +157,121 @@ def run_smoke(
         "else echo NO_DOCKER_BIN; fi"
     )
     comp_line = out.strip().splitlines()[0] if out.strip() else "UNKNOWN"
-    msgs.append(f"compose: {comp_line[:200]}")
+    msgs.append(f"[docker] compose: {comp_line[:200]}")
 
     _, out2, _ = ssh.exec(
         "D=$(ls /mnt/usb*/mi_docker/docker-binaries/docker 2>/dev/null | head -1); "
         "[ -x \"$D\" ] && \"$D\" ps --format '{{.Names}} {{.Status}}' 2>&1 | head -20"
     )
-    msgs.append(f"docker ps:\n{out2.strip()}")
+    msgs.append(f"[docker] docker ps:\n{out2.strip()}")
 
-    _, inet_msg = _check_internet(ssh)
+    inet_ok, inet_msg = _check_internet(ssh)
     msgs.append(inet_msg)
 
-    _, dns_msg = _check_dns(ssh)
+    dns_ok, dns_msg = _check_dns(ssh)
     msgs.append(dns_msg)
 
     sx = services.get("xray_server", {})
     if sx.get("enabled", True):
         port = int(cfg.get("xray", {}).get("inbound", {}).get("port", 443))
-        ok, m = _wait_tcp(ssh, "127.0.0.1", port, log=log)
+        label = "Xray (VLESS inbound)"
+        ok, m = _wait_tcp(
+            ssh, "127.0.0.1", port, log=log, service_label=label
+        )
         msgs.append(m)
+        if not ok:
+            cname = str(sx.get("container_name", "xray-server"))
+            _append_container_diagnostics(
+                ssh, label, cname, msgs, diagnosed_containers
+            )
         ok_all = ok_all and ok
 
     mh = services.get("mihomo", {})
     if mh.get("enabled", True):
+        label = "mihomo"
+        cname = str(mh.get("container_name", "mihomo"))
         for p in (mh.get("socks_port", 7890), mh.get("redir_port", 7891)):
-            ok, m = _wait_tcp(ssh, "127.0.0.1", int(p), log=log)
+            ok, m = _wait_tcp(
+                ssh,
+                "127.0.0.1",
+                int(p),
+                log=log,
+                service_label=label,
+            )
             msgs.append(m)
+            if not ok:
+                _append_container_diagnostics(
+                    ssh, label, cname, msgs, diagnosed_containers
+                )
             ok_all = ok_all and ok
 
     ts = services.get("torrserver", {})
     if ts.get("enabled", True):
         p = int(ts.get("port", 8090))
-        ok, m = _wait_tcp(ssh, "127.0.0.1", p, timeout_s=60, log=log)
+        label = "TorrServer"
+        ok, m = _wait_tcp(
+            ssh,
+            "127.0.0.1",
+            p,
+            timeout_s=60,
+            log=log,
+            service_label=label,
+        )
         msgs.append(m)
         if not ok:
             name = str(ts.get("container_name", "torrserver"))
-            logs = _tail_container_logs(ssh, name)
-            if logs:
-                msgs.append(f"docker logs {name} (tail):\n{logs}")
+            _append_container_diagnostics(
+                ssh, label, name, msgs, diagnosed_containers
+            )
         ok_all = ok_all and ok
 
     md = services.get("metacubexd", {})
     if md.get("enabled", True):
         p = int(md.get("port", 9099))
-        ok, m = _wait_tcp(ssh, "127.0.0.1", p, log=log)
+        label = "Metacubexd (dashboard)"
+        ok, m = _wait_tcp(
+            ssh, "127.0.0.1", p, log=log, service_label=label
+        )
         msgs.append(m)
+        if not ok:
+            name = str(md.get("container_name", "metacubexd"))
+            _append_container_diagnostics(
+                ssh, label, name, msgs, diagnosed_containers
+            )
         ok_all = ok_all and ok
 
-    agh = services.get("adguardhome", {})
-    if agh.get("enabled", True):
-        dns_port = int(agh.get("dns_port", 5353))
-        admin_port = int(agh.get("admin_port", 3000))
+    raw_svc = services.get("adguardhome")
+    agh_svc = raw_svc if isinstance(raw_svc, dict) else {}
+    if agh_svc.get("enabled", True):
+        dns_port = int(agh_app.get("dns_port", 5353))
+        admin_port = int(agh_app.get("admin_port", 3000))
+        label = "AdGuard Home"
+        cname = str(agh_svc.get("container_name", "adguardhome"))
         for p in (dns_port, admin_port):
-            ok, m = _wait_tcp(ssh, "127.0.0.1", p, log=log)
+            ok, m = _wait_tcp(
+                ssh,
+                "127.0.0.1",
+                p,
+                log=log,
+                service_label=label,
+            )
             msgs.append(m)
             if not ok:
-                name = str(agh.get("container_name", "adguardhome"))
-                logs = _tail_container_logs(ssh, name)
-                if logs:
-                    msgs.append(f"docker logs {name} (tail):\n{logs}")
+                _append_container_diagnostics(
+                    ssh, label, cname, msgs, diagnosed_containers
+                )
             ok_all = ok_all and ok
 
+    if not ok_all:
+        if not inet_ok:
+            msgs.append(
+                "[сеть] Подсказка: без связи с интернетом контейнеры часто не поднимаются "
+                "(pull образов, upstream DNS). Проверьте WAN и маршрут по умолчанию."
+            )
+        elif not dns_ok:
+            msgs.append(
+                "[сеть] Подсказка: при сбое DNS проверьте dnsmasq, форвард на AdGuard Home "
+                "и что контейнер слушает adguardhome.dns_port."
+            )
+
     return SmokeResult(ok=ok_all, messages=msgs)
-
-
-def _tail_container_logs(ssh: RouterSSH, container_name: str, tail: int = 80) -> str:
-    """
-    Пытается получить последние строки docker logs с роутера.
-    Используется как диагностика при падении smoke.
-    """
-    script = (
-        "D=$(ls /mnt/usb*/mi_docker/docker-binaries/docker 2>/dev/null | head -1); "
-        "if [ -x \"$D\" ]; then "
-        f"  \"$D\" logs --tail {int(tail)} {container_name} 2>&1 || true; "
-        "else echo NO_DOCKER_BIN; fi"
-    )
-    _, out, _ = ssh.exec(script)
-    return out.strip()

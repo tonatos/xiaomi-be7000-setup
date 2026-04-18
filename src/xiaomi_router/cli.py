@@ -5,7 +5,12 @@ from typing import Optional
 
 import typer
 
-from xiaomi_router.config_loader import load_merged_config, require_router_password
+from xiaomi_router.config_loader import (
+    load_merged_config,
+    require_router_password,
+    validate_main_router_yaml_file,
+    validate_merged_config_for_deploy,
+)
 from xiaomi_router.diagnose import run_diagnose
 from xiaomi_router.paths import default_config_path, default_secrets_path
 from xiaomi_router.pipeline import (
@@ -103,7 +108,30 @@ def cmd_deploy(
     secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),
 ) -> None:
     """Бэкап, рендер, загрузка, UCI, docker compose up, smoke."""
+    main_p = config or default_config_path()
+    try:
+        validate_main_router_yaml_file(main_p)
+    except FileNotFoundError:
+        ex = main_p.parent / "router.example.yaml"
+        typer.echo(
+            typer.style(
+                f"Нет {main_p}. Скопируйте {ex} в {main_p} и заполните.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(typer.style(str(e), fg=typer.colors.RED), err=True)
+        raise typer.Exit(1) from e
+
     cfg = _load(config, secrets)
+    try:
+        validate_merged_config_for_deploy(cfg)
+    except ValueError as e:
+        typer.echo(typer.style(str(e), fg=typer.colors.RED), err=True)
+        raise typer.Exit(1) from e
+
     try:
         meta = deploy(
             cfg,

@@ -1,41 +1,41 @@
 http:
-  address: "0.0.0.0:{{ services_adguardhome_admin_port }}"
-{% if services_adguardhome_http_proxy %}
-http_proxy: {{ services_adguardhome_http_proxy | tojson }}
+  address: "0.0.0.0:{{ adguardhome_admin_port }}"
+{% if adguardhome_http_proxy %}
+http_proxy: {{ adguardhome_http_proxy | tojson }}
 {% endif %}
 
 dns:
   bind_hosts:
-{% for host in services_adguardhome_bind_hosts %}
+{% for host in adguardhome_bind_hosts %}
     - {{ host | tojson }}
 {% endfor %}
-  port: {{ services_adguardhome_dns_port }}
+  port: {{ adguardhome_dns_port }}
   use_private_ptr_resolvers: false
   upstream_dns:
-{% for upstream in services_adguardhome_upstream_dns %}
+{% for upstream in adguardhome_upstream_dns %}
     - {{ upstream | tojson }}
 {% endfor %}
-{% if services_adguardhome_bootstrap_dns %}
+{% if adguardhome_bootstrap_dns %}
   bootstrap_dns:
-{% for bootstrap in services_adguardhome_bootstrap_dns %}
+{% for bootstrap in adguardhome_bootstrap_dns %}
     - {{ bootstrap | tojson }}
 {% endfor %}
 {% endif %}
-{% if services_adguardhome_fallback_dns %}
+{% if adguardhome_fallback_dns %}
   fallback_dns:
-{% for fallback in services_adguardhome_fallback_dns %}
+{% for fallback in adguardhome_fallback_dns %}
     - {{ fallback | tojson }}
 {% endfor %}
 {% endif %}
-{% if services_adguardhome_allowed_clients %}
+{% if adguardhome_allowed_clients %}
   allowed_clients:
-{% for client in services_adguardhome_allowed_clients %}
+{% for client in adguardhome_allowed_clients %}
     - {{ client | tojson }}
 {% endfor %}
 {% endif %}
-{% if services_adguardhome_disallowed_clients %}
+{% if adguardhome_disallowed_clients %}
   disallowed_clients:
-{% for client in services_adguardhome_disallowed_clients %}
+{% for client in adguardhome_disallowed_clients %}
     - {{ client | tojson }}
 {% endfor %}
 {% endif %}
@@ -43,7 +43,7 @@ dns:
 filtering:
   protection_enabled: true
   filtering_enabled: true
-  filters_update_interval: {{ services_adguardhome_filters_update_interval }}
+  filters_update_interval: {{ adguardhome_filters_update_interval }}
 
 filters:
   - enabled: true

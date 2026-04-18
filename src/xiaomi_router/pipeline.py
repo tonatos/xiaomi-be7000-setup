@@ -37,6 +37,37 @@ def _startup_paths(cfg: dict[str, Any]) -> tuple[str, str]:
     return base, f"{base.rstrip('/')}/{sub}"
 
 
+def _compose_up_then_restart(
+    ssh: RouterSSH,
+    env: str,
+    stack: str,
+    log: Callable[[str], None],
+) -> None:
+    """Создаёт/обновляет контейнеры и перезапускает их, чтобы подхватить новые файлы в bind-mount.
+
+    При неизменном compose-файле ``docker compose up -d`` часто не трогает уже
+    запущенные контейнеры; процессы (xray, mihomo и др.) продолжают работать со
+    старым конфигом в памяти. ``compose restart`` перечитывает смонтированные конфиги.
+    """
+    code = ssh.exec_streaming(
+        f"{env}; cd '{stack}' && docker compose up -d 2>&1",
+        log=lambda line: log(f"      {line}"),
+        timeout=300,
+    )
+    if code != 0:
+        raise RuntimeError(f"docker compose up завершился с кодом {code}")
+    log(
+        "      docker compose restart — подхват обновлённых конфигов (bind-mount)..."
+    )
+    code = ssh.exec_streaming(
+        f"{env}; cd '{stack}' && docker compose restart 2>&1",
+        log=lambda line: log(f"      {line}"),
+        timeout=180,
+    )
+    if code != 0:
+        raise RuntimeError(f"docker compose restart завершился с кодом {code}")
+
+
 def ensure_opa_docker_authz_disabled(ssh: RouterSSH) -> bool:
     """Убрать opa-docker-authz из UCI mi_docker (policy denied без этого).
 
@@ -179,12 +210,15 @@ def apply_dnsmasq_forward_to_adguardhome(
     cfg: dict[str, Any],
     log: Callable[[str], None] = _Noop,
 ) -> None:
-    agh = cfg.get("services", {}).get("adguardhome", {})
-    dns_port = int(agh.get("dns_port", 5353))
-    dns_host = str(agh.get("dns_host", "127.0.0.1")).strip() or "127.0.0.1"
+    raw_svc = cfg.get("services", {}).get("adguardhome")
+    agh_svc = raw_svc if isinstance(raw_svc, dict) else {}
+    raw_app = cfg.get("adguardhome")
+    agh_app = raw_app if isinstance(raw_app, dict) else {}
+    dns_port = int(agh_app.get("dns_port", 5353))
+    dns_host = str(agh_app.get("dns_host", "127.0.0.1")).strip() or "127.0.0.1"
     dns_upstream = f"{dns_host}#{dns_port}"
 
-    if not agh.get("enabled", True):
+    if not agh_svc.get("enabled", True):
         # Самовосстановление: если раньше уже включали AGH-forward,
         # при выключенном AGH возвращаем dnsmasq к системным резолверам.
         _, out, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
@@ -288,18 +322,7 @@ def deploy(
         ensure_compose_with_optional_entware(ssh, usb, log=log)
 
         env = remote_compose_env(usb)
-        code = ssh.exec_streaming(
-            f"{env}; cd '{stack}' && docker compose up -d 2>&1",
-            log=lambda line: log(f"      {line}"),
-            timeout=300,
-        )
-        if code != 0:
-            raise RuntimeError(f"docker compose up завершился с кодом {code}")
-
-        # AdGuard Home читает конфиг при старте. При обновлении AdGuardHome.yaml
-        # безопаснее перезапустить контейнер, чтобы избежать работы со старым in-memory cfg.
-        if cfg.get("services", {}).get("adguardhome", {}).get("enabled", True):
-            ssh.exec_text(f"{env}; cd '{stack}' && docker compose restart adguardhome 2>/dev/null || true")
+        _compose_up_then_restart(ssh, env, stack, log=log)
 
         apply_dnsmasq_forward_to_adguardhome(ssh, cfg, log=log)
 
@@ -396,9 +419,7 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         ensure_opa_docker_authz_disabled(ssh)
         ensure_compose_with_optional_entware(ssh, usb)
         env = remote_compose_env(usb)
-        ssh.exec_text(f"{env}; cd '{stack}' && docker compose up -d 2>&1")
-        if cfg.get("services", {}).get("adguardhome", {}).get("enabled", True):
-            ssh.exec_text(f"{env}; cd '{stack}' && docker compose restart adguardhome 2>/dev/null || true")
+        _compose_up_then_restart(ssh, env, stack, log=_Noop)
         apply_dnsmasq_forward_to_adguardhome(ssh, cfg)
     finally:
         ssh.close()
