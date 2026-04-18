@@ -40,23 +40,36 @@ def _startup_paths(cfg: dict[str, Any]) -> tuple[str, str]:
 def ensure_opa_docker_authz_disabled(ssh: RouterSSH) -> bool:
     """Убрать opa-docker-authz из UCI mi_docker (policy denied без этого).
 
-    Перезапуск mi_docker выполняется только если в конфиге ещё указан плагин.
+    Правка через UCI (del_list + commit), иначе последующий ``uci commit mi_docker``
+    (зеркала и др.) может перезаписать файл и вернуть плагин.
+
+    Перезапуск mi_docker только если плагин ещё был в конфиге.
     Возвращает True, если демон трогали (restart/start для применения правки).
     """
     _, probe, _ = ssh.exec(
-        "grep -q 'list authorization_plugins' /etc/config/mi_docker 2>/dev/null && "
-        "grep -q 'opa-docker-authz' /etc/config/mi_docker 2>/dev/null && "
-        "echo NEED || true"
+        "uci show mi_docker 2>/dev/null | grep -qE 'authorization_plugins.*opa-docker-authz' && echo NEED || "
+        "grep -q 'opa-docker-authz' /etc/config/mi_docker 2>/dev/null && echo NEED || true"
     )
     if "NEED" not in probe:
         return False
 
-    ssh.exec_text(
-        "sed -i "
-        "-e \"s/list authorization_plugins 'opa-docker-authz'/list authorization_plugins ''/\" "
-        "-e 's/list authorization_plugins \"opa-docker-authz\"/list authorization_plugins \"\"/g' "
-        "/etc/config/mi_docker"
+    #1) Штатно через UCI (тот же пакет/секция, что и registry_mirrors).
+    _, uci_out, _ = ssh.exec(
+        "if uci -q del_list mi_docker.globals.authorization_plugins='opa-docker-authz'; then "
+        "uci commit mi_docker; echo UCI_OK; "
+        "elif uci -q del_list mi_docker.@globals[0].authorization_plugins='opa-docker-authz'; then "
+        "uci commit mi_docker; echo UCI_OK; "
+        "else echo UCI_SKIP; fi"
     )
+    if "UCI_OK" not in uci_out:
+        # 2) Запасной sed: пробелы/табы в начале строки, одинарные или двойные кавычки.
+        ssh.exec_text(
+            "sed -i "
+            "-e \"s/^[[:space:]]*list[[:space:]]*authorization_plugins[[:space:]]*'opa-docker-authz'[[:space:]]*$/list authorization_plugins ''/\" "
+            "-e 's/^[[:space:]]*list[[:space:]]*authorization_plugins[[:space:]]*\"opa-docker-authz\"[[:space:]]*$/list authorization_plugins \"\"/g' "
+            "/etc/config/mi_docker"
+        )
+
     ssh.exec_text(
         "/etc/init.d/mi_docker restart 2>/dev/null || /etc/init.d/mi_docker start 2>/dev/null || true"
     )
