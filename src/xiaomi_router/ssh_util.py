@@ -147,6 +147,10 @@ class RouterSSH:
         m = mode if mode is not None else 0o644
         if local.suffix in {".sh"}:
             m = 0o755
+        # На Windows рендер создаёт файлы с CRLF (\r\n).
+        # BusyBox sh на роутере не обрабатывает \r — нормализуем для всех текстовых форматов.
+        if local.suffix in {".sh", ".yaml", ".json", ".conf", ".txt"}:
+            data = data.replace(b"\r\n", b"\n")
         self.upload_bytes(remote_path, data, m)
 
     def upload_dir(self, local_root: Path, remote_root: str) -> None:

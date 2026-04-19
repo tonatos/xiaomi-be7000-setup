@@ -170,7 +170,9 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
         _validate_rendered_text(rel_out, content)
         p = out / rel_out
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # newline="\n" — принудительно LF на Windows, иначе write_text пишет \r\n,
+        # что ломает sh/iptables на роутере (BusyBox не обрабатывает \r).
+        p.write_text(content, encoding="utf-8", newline="\n")
 
     # xray
     tpl = env.get_template("xray/config.json.j2")
