@@ -105,13 +105,15 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     docker_bin = f"{usb_mount}/mi_docker/docker-binaries/docker"
     startup = cfg.get("startup", {})
     sm = cfg.get("services", {}).get("mihomo", {})
+    sv2 = cfg.get("services", {}).get("v2raya", {})
     sd = cfg.get("services", {}).get("metacubexd", {})
     _agh = cfg.get("adguardhome")
     agh_app = _agh if isinstance(_agh, dict) else {}
     mihomo_enabled = bool(sm.get("enabled", True))
+    v2raya_enabled = bool(sv2.get("enabled", False))
     agh_http_proxy = str(agh_app.get("http_proxy", "") or "").strip()
-    if agh_http_proxy and not mihomo_enabled:
-        if not bool(agh_app.get("http_proxy_ignore_mihomo_state", False)):
+    if agh_http_proxy and not (mihomo_enabled or v2raya_enabled):
+        if not bool(agh_app.get("http_proxy_ignore_proxy_state", agh_app.get("http_proxy_ignore_mihomo_state", False))):
             agh_http_proxy = ""
     router_host = str(cfg.get("router", {}).get("host", "192.168.31.1")).strip() or "192.168.31.1"
     mihomo_controller_port = _extract_mihomo_controller_port(cfg)
@@ -124,6 +126,9 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
         "startup_autoruns": startup.get("autoruns_subdir", "autoruns"),
         "services_mihomo_redir_port": sm.get("redir_port", 7891),
         "services_mihomo_container_name": sm.get("container_name", "mihomo"),
+        "services_v2raya_port": sv2.get("port", 2017),
+        "services_v2raya_redir_port": sv2.get("redir_port", 52345),
+        "services_v2raya_container_name": sv2.get("container_name", "v2raya"),
         "services_metacubexd_port": sd.get("port", 9099),
         "services_metacubexd_default_backend_url": sd.get(
             "default_backend_url",
@@ -182,13 +187,14 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
     tpl = env.get_template("mihomo/config.yaml.j2")
     w("configs/mihomo/config.yaml", tpl.render(**ctx))
 
-    tpl = env.get_template("mihomo/mihomo-routing.sh.j2")
-    w("mihomo/mihomo-routing.sh", tpl.render(**ctx))
-    (out / "mihomo/mihomo-routing.sh").chmod(0o755)
+    # Общие iptables для LAN (mihomo NAT / v2raya + block_quic)
+    tpl = env.get_template("routing/lan-routing.sh.j2")
+    w("routing/lan-routing.sh", tpl.render(**ctx))
+    (out / "routing/lan-routing.sh").chmod(0o755)
 
-    tpl = env.get_template("mihomo/rollback.sh.j2")
-    w("mihomo/rollback.sh", tpl.render(**ctx))
-    (out / "mihomo/rollback.sh").chmod(0o755)
+    tpl = env.get_template("routing/rollback.sh.j2")
+    w("routing/rollback.sh", tpl.render(**ctx))
+    (out / "routing/rollback.sh").chmod(0o755)
 
     # compose
     tpl = env.get_template("compose/docker-compose.yml.j2")
@@ -210,6 +216,10 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
     tpl = env.get_template("autorun/020-mihomo-routing.sh.j2")
     w("startup/autoruns/020-mihomo-routing.sh", tpl.render(**ctx))
     (out / "startup/autoruns/020-mihomo-routing.sh").chmod(0o755)
+
+    tpl = env.get_template("autorun/021-v2raya-routing.sh.j2")
+    w("startup/autoruns/021-v2raya-routing.sh", tpl.render(**ctx))
+    (out / "startup/autoruns/021-v2raya-routing.sh").chmod(0o755)
 
     # marker for sync
     (out / ".xiaomi_router_revision").write_text(

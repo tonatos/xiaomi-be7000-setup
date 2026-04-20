@@ -1,18 +1,59 @@
 # xiaomi-be7000-setup
 
+- [xiaomi-be7000-setup](#xiaomi-be7000-setup)
+  - [Мотивация](#мотивация)
+  - [Описание](#описание)
+  - [Архитектура](#архитектура)
+  - [Требования](#требования)
+  - [Как использовать конфигуратор](#как-использовать-конфигуратор)
+  - [Быстрый старт](#быстрый-старт)
+    - [Переключение Mihomo на V2rayA](#переключение-mihomo-на-v2raya)
+    - [SSH с нуля (xmir-patcher)](#ssh-с-нуля-xmir-patcher)
+    - [Деплой стека](#деплой-стека)
+    - [Окружение на USB (однократно)](#окружение-на-usb-однократно)
+    - [Переменные окружения](#переменные-окружения)
+    - [Команды](#команды)
+  - [Структура репозитория](#структура-репозитория)
+  - [Подлключение собственных docker-контейнеров](#подлключение-собственных-docker-контейнеров)
+  - [AdGuard Home: настройка и рекомендации](#adguard-home-настройка-и-рекомендации)
+    - [Фильтр-листы «из коробки» (актуально для текущей AGH)](#фильтр-листы-из-коробки-актуально-для-текущей-agh)
+  - [Роутер как Xray-сервер для внешних устройств](#роутер-как-xray-сервер-для-внешних-устройств)
+  - [Прозрачный прокси](#прозрачный-прокси)
+  - [Ограничения Xiaomi Docker](#ограничения-xiaomi-docker)
+  - [Ресурсы](#ресурсы)
+  - [Лицензия](#лицензия)
+
+## Мотивация
+
+Роутер Xiaomi BE7000 крайне противоречивое с потребительской точки зрения устройство. С одной стороны, он обладает очень мощным железом: 4-ядерный процессор, 1Гб оперативной памяти, порты 2.5 Гбит/с., мощные антены, отличное покрытие, поддержка функций Wi-Fi 7. И какточка доступа он работает прекрасно. С другой стороны, для более глубокой настройки и использования всего потенциала железа у нас возникает огромное количество проблем:
+- закрытая китайская прошивка в виде, судя по всему, глубоко переработанного форка OpenWRT
+- свежий процессор Qualcomm IPQ95xx становится и минусом - OpenWRT его не поддерживает
+- крайне маленькое сообщество, отсутствие пакетов и гайдов
+
+В сравнении с Kinetik / Microtik, которые обладают как встроенными инструментами, так и развитым сообществом, инфраструктурой Entware и подробными гайдами, настроить наиболее востребованные инструменты в нашем случае — огромная проблема.
+
+Тем не менее, выход есть. Благодаря возможности получить ssh-доступ к роутеру, мощному железу и возможности установки Docker, владельцы Xiaomi BE7000 все же могут настроить роутер под многие задачи.
+
+Этот конфигуратор — попытка реализовать all-in-one набор решений для комфортного взаимодействия с роутером на более глубоком уровне без необходимости собирать хаки, bash-скрипты по интернету и мучиться с сетью.
+
+## Описание
+
 DevOps-ориентированный конфигуратор для Xiaomi BE7000 (стоковая прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **AdGuard Home**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
 
 - устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
+  - в качестве опции, вместо Mihomo вы можете использовать клиент [v2rayA](https://github.com/v2rayA/v2rayA), если вам привычно настройка клиента и правил через Web GUI
 - [Mihomo Dashboard](https://github.com/MetaCubeX/metacubexd) — интерфейс для мониторинга вашего Mihomo-клиента
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) — DNS-фильтрация (реклама/трекинг/вредоносные домены) с автоматической интеграцией в `dnsmasq`
-- устанавливает Xray-сервер для того, чтобы вы могли подключаться к своему роутеру из внешней сети (например, со своего смартфона), используя роутер, как шлюз для Shadowsocks-прокси с маршрутизацией трафика
+   Xray-сервер для того, чтобы вы могли подключаться к своему роутеру из внешней сети (например, со своего смартфона), используя роутер, как шлюз для Shadowsocks-прокси с маршрутизацией трафика
+- настраивает Entware-окружение в `/opt` с живыми репозиториями
 - бонусом: устанавливает [TorrServer](https://github.com/yourok/torrserver) для просмотра торрентов в домашней сети в реальном времени, например, со SmartTV
 
 В итоге, ваш роутер сможет маршрутизировать трафик в домашней сети, обходя ограничения "с обоих сторон" (в том числе, сервисов, которые заблокировали доступ для российских пользователей) через Shadowsocks и проксируя напрямую весь отечественный трафик (банки, госсервисы). 
 
 Помимо этого, если у вас есть белый IP, вы можете настроить роутер как Xray-сервер для подключения своих смартфонов, чтобы использовать настроенные правила маршрутизации без необходимости выключать proxy-клиент при использовании отечественных сервисов.
 
-В качестве зависимости, конфигуратор использует [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (эксплойт/доступ к устройству и постоянный dropbear) для получения ssh-доступа к роутере.
+В качестве зависимости, конфигуратор использует [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (эксплойт/доступ к устройству и постоянный dropbear) для получения ssh-доступа к роутеру.
+
 
 ## Архитектура
 
@@ -27,7 +68,7 @@ flowchart TD
 
   subgraph Router["Xiaomi BE7000 (Docker stack на USB)"]
     Xray["Xray server\n(vless inbound)"]
-    Mihomo["mihomo\n(маршрутизация/правила)"]
+    Mihomo["Mihomo/v2rayA\n(маршрутизация,правила)"]
     AdGuard["AdGuard Home\n(DNS-фильтрация)"]
     Dashboard["metacubexd\n(dashboard)"]
     Dnsmasq["dnsmasq\n(DHCP/DNS OpenWrt)"]
@@ -42,13 +83,28 @@ flowchart TD
 ```
 
 
-
 ## Требования
 
 - **Python** 3.10+ и [Poetry](https://python-poetry.org/)
 - [go-task](https://taskfile.dev/) (опционально, удобная обёртка над CLI)
 - Роутер с уже включённым **Docker** через веб-интерфейс и привязанным **USB** (как хранилище mi_docker)
 - Для первичного доступа без SSH — репозиторий [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (подключается как git submodule)
+
+Предполагается, что вы обладаете базовыми навыками работы с shell, понимаете, что такое ssh, можете склонировать git-репозиторий, в состоянии гуглить ошибки и, при необходимости, консультироваться по ним с ChatGPT/Grok.
+
+Если вы хотите настроить proxy-клиент (mihomo/v2rayA) для получения доступа к ресурсам с ограничениями (например, youtube.com, grok.com), предполагается, что у либо собственный VPS-сервер, где вы настроили xray/shadowsocks самостоятельно, либо предоставленный одним из множества VPN-поставщиков, но совместимый с доступными протоколами.
+
+## Как использовать конфигуратор
+
+Вы можете использовать как отдельные функции конфигуратора для дальнейшей самостоятельной настройки пакетов, такие:
+- `task bootstrap-ssh`: получение ssh-доступа
+- `task setup-entware`: установить Entware-инфраструктура (`/opt` через bind mount)
+- `task setup-shell-env`: настройка shell-окружения (после активации, команды `docker`, `opkg` и т.п. будут доступны в PATH)
+- `task setup-compose`: установить docker compose plugin в `$USB/opt/docker-cli`
+
+Так и управлять всем стеком полностью. Это предполагает, что конфигуратор развернет на роутере необходимые docker-контейнеры с приложениями (proxy-клиент, proxy-сервер, adguardhome, torrrserver и так далее) в соответствии с конфигурацией вашего `router.yaml`, а так же перенастроит сетевые правила маршрутизации трафика.
+
+Порядок работы такой: вносите изменения в `router.yaml` -> `task deploy`, изменения применяются на роутере.
 
 ## Быстрый старт
 
@@ -63,19 +119,14 @@ poetry install
 ```bash
 cp config/router.example.yaml config/router.yaml
 # Отредактируйте router.yaml: host, пароль SSH, UUID, Reality-ключи,
-# upstream для mihomo и секцию adguardhome
+# upstream для mihomo и так далее
 ```
 
 Если у вашего роутера еще не настроен ssh, то воспользуйтесь инструкцией из [следующей секции](#ssh-с-нуля-xmir-patcher).
 
 `config/router.base.yaml` подгружается автоматически, а `config/router.yaml` переопределяет любые его поля.
 
-Для добавления собственных контейнеров используйте `services.custom` в `router.yaml`:
-каждый элемент этой секции вставляется в общий `docker-compose.yml` как обычный
-`services.<name>` из Docker Compose. Smoke-проверки по умолчанию выполняются только
-для встроенных сервисов проекта.
-
-Укажите данные вашего proxy-сервера в секции `mihomo.proxies` файла `config/router.yaml`. Вот пример для Shadowsocks прокси:
+Если вы используете Mihomo, то укажите данные вашего proxy-сервера в секции `mihomo.proxies` файла `config/router.yaml`. Вот пример для Shadowsocks прокси:
 ```
 proxies:
   - name: "upstream"
@@ -83,18 +134,42 @@ proxies:
     server: 77.111.111.111          # IP вашего сервера
     port: 34414                     # порт
     cipher: chacha20-ietf-poly1305  # cipher
-    password: "YOU_PASSWORD"        # пароль
+    password: "YOUR_PASSWORD"        # пароль
     udp: true
     ip-version: ipv4
 ```
 
-Настройки указывать в соответствии с документацией [Mihomo Proxies](https://wiki.metacubex.one/ru/config/proxies/).
+Настройки указывать в соответствии с документацией [Mihomo Proxies](https://wiki.metacubex.one/ru/config/proxies/). 
 
-Переменные окружения (перекрывают YAML): `ROUTER_HOST`, `ROUTER_SSH_PASSWORD`, `ROUTER_SSH_PORT`, `ROUTER_SSH_USER`, `ROUTER_PUBLIC_HOST`.
+`v2rayA` настраивается через Web GUI.
+
+### Переключение Mihomo на V2rayA
+
+В `config/router.yaml`:
+```yaml
+# Смените proxy-клиент
+proxy_client: "v2raya"
+
+services:
+  # Отключите mihomo и metacubexd
+  mihomo:
+    enabled: false
+  metacubexd:
+    enabled: false
+  
+  # Включите контейнер с v2raya
+  v2raya:
+    enabled: true
+
+# Секция mihomo больше не нужна
+mihomo: []
+```
+
+Прозрачный прокси для LAN задаётся так же, как для mihomo: `routing.apply_iptables: true` и скрипт `stack/routing/lan-routing.sh` (TCP `REDIRECT` на `services.v2raya.redir_port`, по умолчанию **52345** — как у inbound `transparent` в [v2rayA](https://github.com/v2rayA/v2rayA/blob/main/service/core/v2ray/v2rayTmpl.go)). В веб-интерфейсе v2rayA включите **прозрачный прокси** в режиме **Redirect**, чтобы ядро слушало этот порт; правила `iptables` для редиректа с хоста роутера проект не поручает контейнеру, а применяет при старте (в т.ч. после перезагрузки) скрипт автозапуска. Если `apply_iptables: true`, автозапуск дождётся открытия redir-порта перед применением `lan-routing.sh`.
 
 ### SSH с нуля (xmir-patcher)
 
-Если порт **22 закрыт**, после `git submodule update --init third_party/xmir-patcher`:
+Если порт **22 закрыт**, после `git submodule update --init third_party/xmir-patcher` выполните:
 
 ```bash
 task bootstrap-ssh
@@ -104,6 +179,35 @@ poetry run xiaomi-router bootstrap-ssh
 ```
 
 Последовательно вызываются `connect.py <IP>` и `install_ssh.py` из [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (эксплойт/доступ к устройству и постоянный dropbear). Может понадобиться пароль веб-интерфейса Xiaomi — следуйте подсказкам скриптов upstream.
+
+### Деплой стека
+
+Команда копирует необходимые конфиги, скрипты с правилами маршрутизации, развертывает docker-контейнеры, настраивает `dnsmasq -> AdGuard Home` через UCI и проверяет работоспособность.
+
+```bash
+task deploy
+# или
+poetry run xiaomi-router deploy
+```
+
+Опции деплоя:
+
+- `--skip-smoke` — не запускать smoke-проверки после `docker compose up`.
+- `--no-rollback-on-smoke-fail` — если smoke не прошёл, завершить deploy ошибкой, но не выполнять `docker compose down` и rollback.
+
+Перед изменениями на USB создаётся архив в `$USB/backups/`, а также `uci export firewall` и `uci export dhcp`; по умолчанию при ошибке smoke выполняются `docker compose down`, затем откат файлов и импорт сохранённых `firewall`/`dhcp`.
+
+Доступные эндпоинты, после развертывания полного стека:
+- [http://192.168.31.1:3000](http://192.168.31.1:3000) — AdGuard
+- [http://192.168.31.1:9099](http://192.168.31.1:9099) — Mihomo Dashboard Metacube
+- [http://192.168.31.1:2017](http://192.168.31.1:2017) — v2rayA
+- [http://192.168.31.1:8090](http://192.168.31.1:8090/) — Torrserver
+
+Чтобы подключиться Metacube к Mihomo-серверу, нужно указать адрес `http://192.168.31.1:9010/` (по умолчанию) и секрет, указанный в секции `mihomo.secret` (по умолчанию, пусто).
+
+Обновите базы для Mihomo:
+- `Правила` / `Провайдеры правил` — нажать на обновление у обоих, должны подгрузиться базы `re:filter`
+- `Конфигурация`, снизу `Обновить базы GEO` — должны обновиться встроенные геобазы
 
 ### Окружение на USB (однократно)
 
@@ -130,34 +234,29 @@ task setup-compose      # плагин docker compose на USB
 `task deploy` сам подготавливает shell env (`usb-env.sh` + `/etc/profile` hook) и проверяет наличие `docker compose` на роутере.  
 Если compose отсутствует, запускается автоустановка (`setup-compose`), а при неуспехе — попытка `setup-entware` и повторная установка compose.
 
-### Деплой стека
 
-Команда копирует необходимые конфиги, скрипты с правилами маршрутизации, развертывает docker-контейнеры, настраивает `dnsmasq -> AdGuard Home` через UCI и проверяет работоспособность.
+### Переменные окружения
 
-```bash
-task deploy
-# или
-poetry run xiaomi-router deploy
-```
+Доступные переменные окружения (переопределяют YAML): 
+- `ROUTER_HOST`
+- `ROUTER_SSH_PASSWORD`
+- `ROUTER_SSH_PORT`
+- `ROUTER_SSH_USER`
+- `ROUTER_PUBLIC_HOST`
 
-Опции деплоя:
-
-- `--skip-smoke` — не запускать smoke-проверки после `docker compose up`.
-- `--no-rollback-on-smoke-fail` — если smoke не прошёл, завершить deploy ошибкой, но не выполнять `docker compose down` и rollback.
-
-Перед изменениями на USB создаётся архив в `$USB/backups/`, а также `uci export firewall` и `uci export dhcp`; по умолчанию при ошибке smoke выполняются `docker compose down`, затем откат файлов и импорт сохранённых `firewall`/`dhcp`.
-
-Доступные эндпоинты, после развертывания полного стека:
-- [http://192.168.31.1:3000](http://192.168.31.1:3000) — AdGuard
-- [http://192.168.31.1:9099](http://192.168.31.1:9099) — Mihomo Dashboard Metacube
-- [http://192.168.31.1:8090](http://192.168.31.1:8090/) — Torrserver
-
-### Полезные команды
+### Команды
 
 | Команда | Назначение |
 | --- | --- |
+| **Системные команды** |
 | `task install` | Установить Python-зависимости (`poetry install`) |
+| **Управление роутером** |
 | `task bootstrap-ssh` | Поднять SSH через `xmir-patcher`, если порт 22 недоступен |
+| `task diagnose` | Сводка по состоянию `mi_docker` / USB |
+| `task setup-shell-env` | Настроить `usb-env.sh` и автоподхват env в SSH (`/etc/profile`) |
+| `task setup-entware` | Установить Entware на USB (`/opt` через bind mount) |
+| `task setup-compose` | Установить compose plugin в `$USB/opt/docker-cli` |
+| **Управление стеком** |
 | `task render` | Локальный рендер в `build/rendered` (USB-заглушка) |
 | `task render-live` | Рендер с определением USB по SSH |
 | `task deploy` | Полный деплой (backup, upload, UCI, compose up, smoke) |
@@ -165,11 +264,9 @@ poetry run xiaomi-router deploy
 | `task sync-pull` | Скачать конфиги со стека в `build/synced-from-router` |
 | `task sync-push` | Залить `build/rendered` и выполнить `docker compose up -d` |
 | `task rollback -- path/to/deploy-....json` | Откат по метаданным deploy (JSON с роутера) |
-| `task diagnose` | Сводка по состоянию `mi_docker` / USB |
+| **Vless-сервер** |
 | `task vless-link` | Напечатать VLESS (Reality) ссылку для клиента |
-| `task setup-shell-env` | Настроить `usb-env.sh` и автоподхват env в SSH (`/etc/profile`) |
-| `task setup-entware` | Установить Entware на USB (`/opt` через bind mount) |
-| `task setup-compose` | Установить compose plugin в `$USB/opt/docker-cli` |
+| `task vless-server-setup` | Сгенерировать ключи и клиентов для Xray REALITY на онове вашего текущего `router.yaml` |
 
 CLI-эквиваленты (без `task`):
 
@@ -190,11 +287,39 @@ task rollback ./deploy-....json
 - `config/router.example.yaml` — основной пример (в git)
 - `config/router.base.yaml` — базовые системные значения (в git)
 - `config/router.yaml` — ваш файл (в `.gitignore`)
-- `templates/` — Jinja2-шаблоны: xray, mihomo, compose, autorun-скрипты
+- `templates/` — Jinja2-шаблоны: xray, mihomo, routing (iptables LAN), compose, autorun-скрипты
 - `src/xiaomi_router/` — Python CLI
 - `third_party/xmir-patcher` — submodule
 
-На USB создаётся каталог `stack/` (имя задаётся в `stack.relative_dir`): `docker-compose.yml`, `configs/xray`, `configs/mihomo`, `configs/adguardhome`, `mihomo/mihomo-routing.sh`. По умолчанию туда же разворачивается `metacubexd` (веб-дашборд Mihomo) на порту `9099` роутера.
+На USB создаётся каталог `stack/` (имя задаётся в `stack.relative_dir`): `docker-compose.yml`, `configs/xray`, `configs/mihomo`, `configs/adguardhome`, `routing/lan-routing.sh` (общие iptables для выбранного `proxy_client`). По умолчанию туда же разворачивается `metacubexd` (веб-дашборд Mihomo) на порту `9099` роутера.
+
+## Подлключение собственных docker-контейнеров
+
+Для добавления собственных контейнеров используйте `services.custom` в `router.yaml`: каждый элемент этой секции вставляется в общий `docker-compose.yml` как обычный `services.<name>` из Docker Compose. Smoke-проверки по умолчанию выполняются только для встроенных сервисов проекта.
+
+Пример установки торрент-клиент Transmission:
+```yaml
+services:
+  custom:
+    transmission:
+      image: "lscr.io/linuxserver/transmission:latest"
+      container_name: "transmission"
+      restart: unless-stopped
+      network_mode: host
+      environment:
+        - PUID=0
+        - PGID=0
+        - TZ=Europe/Moscow
+        # Опционально: веб-интерфейс (см. документацию образа)
+        # - USER=admin
+        # - PASS=секрет
+      volumes:
+        # Конфиг рядом со стеком на USB (относительные пути — как у остальных сервисов)
+        - "./configs/transmission:/config"
+        # Загрузки — только под деревом USB, иначе на Xiaomi Docker после перезагрузки может не подняться демон
+        - "./data/transmission/downloads:/downloads"
+        - "./data/transmission/incomplete:/incomplete"
+```
 
 ## AdGuard Home: настройка и рекомендации
 
@@ -210,24 +335,76 @@ task rollback ./deploy-....json
 
 В проекте эти же дефолты закладываются в рендер `configs/adguardhome/conf/AdGuardHome.yaml`.
 
-## VLESS и «белый» IP
+## Роутер как Xray-сервер для внешних устройств
 
-Вы можете использовать ваш роутер как Xray-сервер для внешних клиентов (например, смартфонов) для того, чтобы маршрутизировать трафик по правилам, сконфигурированным в `Mihomo` (в частности, отправлять запросы к ресурсам с ограничениями через зарубежный proxy-сервер). В качестве клиента можно использовать любой, который поддерживает Vless (Hiddify, V2RayTun, Happ, etc.)
+Вы можете использовать ваш роутер как Xray-сервер для внешних клиентов (например, смартфонов) для того, чтобы маршрутизировать трафик по правилам, сконфигурированным в `Mihomo`/`v2raya` (в частности, отправлять запросы к ресурсам с ограничениями через зарубежный proxy-сервер). 
 
-Команда `vless-link` строит ссылку из `public_endpoint.host` (или `--host`) и секретов Reality для подключения. Для доступа **из интернета** нужны:
+Это позволит избавиться от необходимости подключаться напрямую к зарубежному серверу из мобильной сети в условиях ограничений мобильного интернета. Трафик внутри сети работает стабильнее.
+
+В качестве клиента можно использовать любой, который поддерживает Vless (V2RayTun, Hiddify, Happ, etc.)
+
+Чтобы подключить эту возможность, нужно указать следующие параметры в конфиге:
+```yaml
+services:
+  xray_server:
+    # Включить Xray-сервер. Должен быть true
+    enabled: true
+
+xray:
+  clients:
+    - # UUID клиента VLESS.
+      id: "00000000-0000-0000-0000-000000000000"
+      # Flow клиента (для Reality обычно xtls-rprx-vision).
+      flow: "xtls-rprx-vision"
+  reality:
+    # Приватный ключ пары Reality (сгенерируйте командой: `task vless-server-setup`).
+    private_key: "YOUR_REALITY_PRIVATE_KEY_BASE64URL"
+    # Список short_id (hex), используемый клиентами.
+    short_ids:
+      - "0123456789abcdef"
+```
+
+Настройка осуществляется в соответствии с [документацией](https://xtls.github.io/ru/config/transport.html#realityobject). 
+
+Для быстрой генерации секции `xray` с ключами и `short_id` выполните:
+```bash
+task vless-server-setup
+# или
+poetry run xiaomi-router vless-server-setup
+```
+Скопируйте вывод команды в ваш `config/router.yaml`. Если вам нужно добавить еще одного клиента, используйте флаг `--add-client`.
+
+Команда `vless-link` строит ссылку из `public_endpoint.host` (или `--host`) и секретов Reality для подключения ваших клиентов. Для доступа **из интернета** нужны:
 
 - проброс порта с WAN на хост роутера (порт inbound Xray, по умолчанию 443);
 - у провайдера — публичный («белый») IP или статический адрес на вашем VPS, если вы выкладываете трафик иначе.
 
 Роутер не обязан знать ваш внешний адрес — укажите его вручную в конфиге или в `--host`.
 
-## Прозрачный прокси (iptables)
+## Прозрачный прокси
 
-По умолчанию, весь трафик вашей **не будет** маршрутизироваться в прокси-клиент `Mihomo`, в `router.yaml` секция `routing.apply_iptables` по умолчанию `false`. Чтобы, маршутизировать трафик внутри сети согаласно вашим правилам, ее необходимо включить. Включайте только понимая последствия для вашей LAN (`routing.lan_cidr`).
+По умолчанию, весь трафик вашей **не будет** маршрутизироваться в прокси-клиент `Mihomo`/`v2RayA` по умолчанию.
+
+В `router.yaml` секция `routing.apply_iptables` по умолчанию `false`. Чтобы маршрутизировать **TCP** из LAN через выбранный клиент, включите `routing.apply_iptables: true`: на роутере применяется `stack/routing/lan-routing.sh` — для **mihomo** редирект на `services.mihomo.redir_port` (по умолчанию 7891), для **v2rayA** — на `services.v2raya.redir_port` (по умолчанию 52345). 
+
+Для v2rayA дополнительно в UI включите прозрачный прокси **Redirect**, иначе ядро не поднимет inbound на redir-порту.
+
+Включайте только понимая последствия для вашей LAN (`routing.lan_cidr`). Если по каким-то причинам, сетевые правила сломали вам интернет, откатите их командой (через ssh на роутере):
+```sh
+/mnt/usb-XXXXXXXX/stack/routing/rollback.sh
+```
+
+Где:
+- `usb-XXXXXXXX` - директория с вашей USB-флешкой
 
 ## Ограничения Xiaomi Docker
 
 Тома и проект Compose должны находиться под путями вида `/mnt/usb-*/…`. В случае, если docker-контейнеры будут ссылаться на пути за пределами `/mnt/usb-*/…`, роутер не запустит docker-демон при перезагрузке.
+
+## Ресурсы
+- [чат в Telegram](https://t.me/c/xiaomi_be7000/1)
+- [ветка обсуждени на 4pda](https://4pda.to/forum/index.php?showtopic=1070166)
+- [эксплойт xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher)
 
 ## Лицензия
 

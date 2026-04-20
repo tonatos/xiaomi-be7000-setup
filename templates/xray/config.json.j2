@@ -40,7 +40,7 @@
   ],
   "outbounds": [
     {
-      "tag": "to-mihomo",
+      "tag": "to-proxy",
       "protocol": "socks",
       "settings": {
         "servers": [
@@ -62,7 +62,7 @@
       {
         "type": "field",
         "inboundTag": ["{{ xray.inbound.tag }}"],
-        "outboundTag": "to-mihomo"
+        "outboundTag": "to-proxy"
       }
     ]
   }

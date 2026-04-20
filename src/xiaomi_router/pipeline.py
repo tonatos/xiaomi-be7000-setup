@@ -45,12 +45,14 @@ def _compose_up_then_restart(
 ) -> None:
     """Создаёт/обновляет контейнеры и перезапускает их, чтобы подхватить новые файлы в bind-mount.
 
+    ``--remove-orphans`` убирает контейнеры сервисов, удалённых из compose.
+
     При неизменном compose-файле ``docker compose up -d`` часто не трогает уже
     запущенные контейнеры; процессы (xray, mihomo и др.) продолжают работать со
     старым конфигом в памяти. ``compose restart`` перечитывает смонтированные конфиги.
     """
     code = ssh.exec_streaming(
-        f"{env}; cd '{stack}' && docker compose up -d 2>&1",
+        f"{env}; cd '{stack}' && docker compose up -d --remove-orphans 2>&1",
         log=lambda line: log(f"      {line}"),
         timeout=300,
     )
@@ -205,28 +207,73 @@ def apply_docker_registry_mirrors(
     log("      mi_docker перезапущен.")
 
 
-def apply_dnsmasq_forward_to_adguardhome(
+def _mihomo_dns_upstream_for_dnsmasq(cfg: dict[str, Any]) -> str | None:
+    """
+    Адрес для UCI dhcp.@dnsmasq[0].server=…#port при network_mode: host у mihomo.
+    Возвращает None, если встроенный DNS mihomo выключен (dns.enable: false).
+    """
+    mihomo_app = cfg.get("mihomo") if isinstance(cfg.get("mihomo"), dict) else {}
+    dns = mihomo_app.get("dns") if isinstance(mihomo_app.get("dns"), dict) else {}
+    if dns.get("enable") is False:
+        return None
+    listen = str(dns.get("listen", "0.0.0.0:1053")).strip()
+    try:
+        port = int(listen.rsplit(":", maxsplit=1)[-1].strip())
+    except (ValueError, IndexError):
+        port = 1053
+    if port < 1 or port > 65535:
+        port = 1053
+    return f"127.0.0.1#{port}"
+
+
+def apply_dnsmasq_upstream(
     ssh: RouterSSH,
     cfg: dict[str, Any],
     log: Callable[[str], None] = _Noop,
 ) -> None:
-    raw_svc = cfg.get("services", {}).get("adguardhome")
-    agh_svc = raw_svc if isinstance(raw_svc, dict) else {}
+    """
+    Направляет dnsmasq на локальный DNS-стек: AdGuard Home или mihomo (порт из mihomo.dns.listen).
+    Если оба не подходят — снимает ранее выставленный нами forward (noresolv/server).
+    """
+    raw_agh = cfg.get("services", {}).get("adguardhome")
+    agh_svc = raw_agh if isinstance(raw_agh, dict) else {}
+    raw_mihomo = cfg.get("services", {}).get("mihomo")
+    mihomo_svc = raw_mihomo if isinstance(raw_mihomo, dict) else {}
     raw_app = cfg.get("adguardhome")
     agh_app = raw_app if isinstance(raw_app, dict) else {}
     dns_port = int(agh_app.get("dns_port", 5353))
     dns_host = str(agh_app.get("dns_host", "127.0.0.1")).strip() or "127.0.0.1"
-    dns_upstream = f"{dns_host}#{dns_port}"
+    agh_upstream = f"{dns_host}#{dns_port}"
 
-    if not agh_svc.get("enabled", True):
-        # Самовосстановление: если раньше уже включали AGH-forward,
-        # при выключенном AGH возвращаем dnsmasq к системным резолверам.
-        _, out, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
-        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-        has_local_forward = any(dns_upstream in ln for ln in lines)
-        has_noresolv = any("noresolv='1'" in ln for ln in lines)
-        if has_local_forward or has_noresolv:
-            log("      AdGuard Home отключен — восстанавливаю штатный dnsmasq (без local forward).")
+    mihomo_upstream = _mihomo_dns_upstream_for_dnsmasq(cfg)
+    proxy_client = str(cfg.get("proxy_client", "mihomo")).strip()
+
+    desired: str | None
+    if agh_svc.get("enabled", True):
+        desired = agh_upstream
+    elif (
+        proxy_client == "mihomo"
+        and mihomo_svc.get("enabled", True)
+        and mihomo_upstream is not None
+    ):
+        desired = mihomo_upstream
+    else:
+        desired = None
+
+    _, out, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
+    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    has_noresolv = any("noresolv='1'" in ln for ln in lines)
+    has_agh_forward = any(agh_upstream in ln for ln in lines)
+    has_mihomo_forward = (
+        any(mihomo_upstream in ln for ln in lines) if mihomo_upstream else False
+    )
+
+    if desired is None:
+        if has_agh_forward or has_mihomo_forward or has_noresolv:
+            log(
+                "      AdGuard Home / mihomo DNS не используются как upstream — "
+                "восстанавливаю штатный dnsmasq (без local forward)."
+            )
             cmds = [
                 "uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null || true",
                 "uci -q delete dhcp.@dnsmasq[0].noresolv 2>/dev/null || true",
@@ -236,20 +283,20 @@ def apply_dnsmasq_forward_to_adguardhome(
             ssh.exec_text("/etc/init.d/dnsmasq restart 2>/dev/null || true")
             log("      dnsmasq восстановлен к системным upstream.")
         else:
-            log("      AdGuard Home отключен — dnsmasq уже в штатном режиме.")
+            log("      dnsmasq уже в штатном режиме (без forward на AGH/mihomo).")
         return
 
-    log(f"      Настройка dnsmasq -> {dns_upstream} через UCI...")
+    log(f"      Настройка dnsmasq -> {desired} через UCI...")
     cmds = [
         "uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null || true",
         "uci set dhcp.@dnsmasq[0].noresolv='1'",
-        f"uci add_list dhcp.@dnsmasq[0].server='{dns_upstream}'",
+        f"uci add_list dhcp.@dnsmasq[0].server='{desired}'",
         "uci commit dhcp",
     ]
     ssh.exec_text("; ".join(cmds))
-    _, out, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
-    if out.strip():
-        for line in out.strip().splitlines():
+    _, out2, _ = ssh.exec("uci show dhcp.@dnsmasq[0] | grep -E 'server=|noresolv=' || true")
+    if out2.strip():
+        for line in out2.strip().splitlines():
             log(f"      {line}")
     ssh.exec_text("/etc/init.d/dnsmasq restart 2>/dev/null || true")
     log("      dnsmasq перезапущен.")
@@ -293,20 +340,21 @@ def deploy(
 
         log("[4/6] Загрузка файлов на роутер...")
         ssh.exec_text(
-            f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo' "
+            f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo' '{stack}/configs/v2raya' "
             f"'{stack}/configs/adguardhome/conf' '{stack}/configs/adguardhome/work' "
-            f"'{stack}/mihomo'"
+            f"'{stack}/routing'"
         )
         uploads = [
             (out / "docker-compose.yml",                          f"{stack}/docker-compose.yml",                                   None),
             (out / "configs/xray/config.json",                    f"{stack}/configs/xray/config.json",                             None),
             (out / "configs/mihomo/config.yaml",                  f"{stack}/configs/mihomo/config.yaml",                           None),
             (out / "configs/adguardhome/conf/AdGuardHome.yaml",   f"{stack}/configs/adguardhome/conf/AdGuardHome.yaml",            None),
-            (out / "mihomo/mihomo-routing.sh",                    f"{stack}/mihomo/mihomo-routing.sh",                             0o755),
-            (out / "mihomo/rollback.sh",                          f"{stack}/mihomo/rollback.sh",                                   0o755),
+            (out / "routing/lan-routing.sh",                      f"{stack}/routing/lan-routing.sh",                               0o755),
+            (out / "routing/rollback.sh",                         f"{stack}/routing/rollback.sh",                                  0o755),
             (out / "startup/startup.sh",                          f"{startup_base}/startup.sh",                                    0o755),
             (out / "startup/autoruns/010-start-docker.sh",        f"{startup_base}/autoruns/010-start-docker.sh",                  0o755),
             (out / "startup/autoruns/020-mihomo-routing.sh",      f"{startup_base}/autoruns/020-mihomo-routing.sh",                0o755),
+            (out / "startup/autoruns/021-v2raya-routing.sh",      f"{startup_base}/autoruns/021-v2raya-routing.sh",                0o755),
         ]
         for local, remote, mode in uploads:
             log(f"      → {remote}")
@@ -324,13 +372,13 @@ def deploy(
         env = remote_compose_env(usb)
         _compose_up_then_restart(ssh, env, stack, log=log)
 
-        apply_dnsmasq_forward_to_adguardhome(ssh, cfg, log=log)
+        apply_dnsmasq_upstream(ssh, cfg, log=log)
 
         routing = cfg.get("routing", {})
         if routing.get("apply_iptables", False) or routing.get("block_quic", False):
-            log("      Применяю mihomo routing правила (start)...")
+            log("      Применяю lan-routing (iptables) (start)...")
             ssh.exec_streaming(
-                f"sh '{stack}/mihomo/mihomo-routing.sh' start 2>&1",
+                f"sh '{stack}/routing/lan-routing.sh' start 2>&1",
                 log=lambda line: log(f"      {line}"),
                 timeout=60,
             )
@@ -344,7 +392,10 @@ def deploy(
                 if rollback_on_smoke_fail:
                     log("      Smoke не прошёл — откат...")
                     ssh.exec_text(
-                        f"{env}; cd '{stack}' && docker compose down 2>/dev/null || true"
+                        f"sh '{stack}/routing/lan-routing.sh' stop 2>/dev/null || true"
+                    )
+                    ssh.exec_text(
+                        f"{env}; cd '{stack}' && docker compose down --remove-orphans 2>/dev/null || true"
                     )
                     if meta:
                         rollback(ssh, meta)
@@ -381,7 +432,7 @@ def pull_configs(
             "configs/mihomo/config.yaml",
             "configs/adguardhome/conf/AdGuardHome.yaml",
             "docker-compose.yml",
-            "mihomo/mihomo-routing.sh",
+            "routing/lan-routing.sh",
         ):
             rpath = f"{stack}/{rel}"
             if not ssh.remote_path_exists(rpath):
@@ -414,13 +465,13 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
             out / "configs/adguardhome/conf/AdGuardHome.yaml",
             f"{stack}/configs/adguardhome/conf/AdGuardHome.yaml",
         )
-        ssh.upload_file(out / "mihomo/mihomo-routing.sh", f"{stack}/mihomo/mihomo-routing.sh", mode=0o755)
-        ssh.upload_file(out / "mihomo/rollback.sh", f"{stack}/mihomo/rollback.sh", mode=0o755)
+        ssh.upload_file(out / "routing/lan-routing.sh", f"{stack}/routing/lan-routing.sh", mode=0o755)
+        ssh.upload_file(out / "routing/rollback.sh", f"{stack}/routing/rollback.sh", mode=0o755)
         ensure_opa_docker_authz_disabled(ssh)
         ensure_compose_with_optional_entware(ssh, usb)
         env = remote_compose_env(usb)
         _compose_up_then_restart(ssh, env, stack, log=_Noop)
-        apply_dnsmasq_forward_to_adguardhome(ssh, cfg)
+        apply_dnsmasq_upstream(ssh, cfg)
     finally:
         ssh.close()
 

@@ -48,6 +48,16 @@ def load_merged_config(
         cfg.setdefault("router", {})["ssh_password"] = secrets.pop("ssh_password")
     cfg = _deep_merge(cfg, secrets)
 
+    # Adjust default ports if proxy_client is v2raya and user didn't override them
+    if cfg.get("proxy_client") == "v2raya":
+        xray_routing = cfg.setdefault("xray", {}).setdefault("routing", {})
+        if xray_routing.get("socks_upstream_port") == 7890:
+            xray_routing["socks_upstream_port"] = 20170
+        
+        agh = cfg.setdefault("adguardhome", {})
+        if agh.get("http_proxy") == "socks5://127.0.0.1:7890":
+            agh["http_proxy"] = "socks5://127.0.0.1:20170"
+
     router = cfg.setdefault("router", {})
     if host := os.environ.get("ROUTER_HOST"):
         router["host"] = host
@@ -148,6 +158,10 @@ def validate_merged_config_for_deploy(cfg: dict[str, Any]) -> None:
             errs.extend(_port_errors(val, yaml_path))
 
     sv = services if isinstance(services, dict) else {}
+    proxy_client = cfg.get("proxy_client", "mihomo")
+    if proxy_client not in ("mihomo", "v2raya"):
+        errs.append(f"proxy_client: ожидается 'mihomo' или 'v2raya', получено '{proxy_client}'")
+
     sx = sv.get("xray_server", {})
     x_en = bool(sx.get("enabled", True)) if isinstance(sx, dict) else True
     xi = cfg.get("xray", {}).get("inbound", {}) if isinstance(cfg.get("xray"), dict) else {}
@@ -159,6 +173,14 @@ def validate_merged_config_for_deploy(cfg: dict[str, Any]) -> None:
 
     mh = sv.get("mihomo", {})
     m_en = bool(mh.get("enabled", True)) if isinstance(mh, dict) else True
+    v2 = sv.get("v2raya", {})
+    v2_en = bool(v2.get("enabled", False)) if isinstance(v2, dict) else False
+
+    if proxy_client == "mihomo" and v2_en:
+        errs.append("services.v2raya: должен быть выключен (enabled: false), так как proxy_client='mihomo'")
+    if proxy_client == "v2raya" and m_en:
+        errs.append("services.mihomo: должен быть выключен (enabled: false), так как proxy_client='v2raya'")
+
     if isinstance(mh, dict):
         check_enabled_service_ports(
             "mihomo",
@@ -200,6 +222,16 @@ def validate_merged_config_for_deploy(cfg: dict[str, Any]) -> None:
                             f"mihomo.proxies[{i}]: задайте непустой server (адрес upstream-прокси); "
                             "см. закомментированный пример в config/router.example.yaml"
                         )
+
+    if v2_en:
+        check_enabled_service_ports(
+            "v2raya",
+            v2_en,
+            [
+                ("services.v2raya.port", v2.get("port", 2017)),
+                ("services.v2raya.redir_port", v2.get("redir_port", 52345)),
+            ],
+        )
 
     ts = sv.get("torrserver", {})
     t_en = bool(ts.get("enabled", True)) if isinstance(ts, dict) else True

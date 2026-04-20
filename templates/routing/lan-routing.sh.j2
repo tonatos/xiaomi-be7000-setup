@@ -1,0 +1,111 @@
+#!/bin/sh
+# Правила iptables для LAN (прозрачный TCP-редирект на mihomo или v2rayA).
+# Клиент задаётся в router.yaml: proxy_client (mihomo | v2raya).
+# NAT-redir: routing.apply_iptables + включённый соответствующий сервис.
+#
+# Исключённые IP (routing.excluded_ips): устройства с чувствительным NAT (Xbox и др.) —
+# не проходят через редирект.
+
+{% set pc = proxy_client | default('mihomo') %}
+{% set mihomo_enabled = services.mihomo.enabled | default(true) %}
+{% set v2raya_enabled = services.v2raya.enabled | default(false) %}
+{% set v2raya_redir = services.v2raya.redir_port | default(52345) %}
+CHAIN_MIHOMO="MIHOMO_{{ services.mihomo.container_name | default('mihomo') | upper | replace('-', '_') }}"
+CHAIN_V2RAYA="V2RAYA_{{ services.v2raya.container_name | default('v2raya') | upper | replace('-', '_') }}"
+
+_cleanup_mihomo_nat() {
+    iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_MIHOMO" 2>/dev/null || true
+    iptables -t nat -F "$CHAIN_MIHOMO" 2>/dev/null || true
+    iptables -t nat -X "$CHAIN_MIHOMO" 2>/dev/null || true
+}
+
+_cleanup_v2raya_nat() {
+    iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_V2RAYA" 2>/dev/null || true
+    iptables -t nat -F "$CHAIN_V2RAYA" 2>/dev/null || true
+    iptables -t nat -X "$CHAIN_V2RAYA" 2>/dev/null || true
+}
+
+_start() {
+{% if pc == 'mihomo' %}
+{% if routing.apply_iptables | default(false) and mihomo_enabled %}
+    _cleanup_v2raya_nat
+    iptables -t nat -N "$CHAIN_MIHOMO" 2>/dev/null || iptables -t nat -F "$CHAIN_MIHOMO"
+{% for ip in routing.excluded_ips | default([]) %}
+    iptables -t nat -A "$CHAIN_MIHOMO" -s {{ ip }} -j RETURN
+{% endfor %}
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 0.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 10.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 127.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 169.254.0.0/16 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 172.16.0.0/12 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 192.168.0.0/16 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 224.0.0.0/4 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -d 240.0.0.0/4 -j RETURN
+    iptables -t nat -A "$CHAIN_MIHOMO" -p tcp -j REDIRECT --to-ports {{ services.mihomo.redir_port }}
+    iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_MIHOMO" 2>/dev/null || \
+      iptables -t nat -A PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_MIHOMO"
+    logger -t lan-routing "iptables nat redirect mihomo -> {{ services.mihomo.redir_port }} for {{ routing.lan_cidr }}"
+{% elif routing.apply_iptables | default(false) and not mihomo_enabled %}
+    _cleanup_mihomo_nat
+    _cleanup_v2raya_nat
+    logger -t lan-routing "apply_iptables=true, но services.mihomo.enabled=false — NAT-редирект на mihomo не применяю"
+{% else %}
+    logger -t lan-routing "apply_iptables=false — NAT-redir mihomo не применялся (см. routing в router.yaml)"
+{% endif %}
+{% else %}
+{# proxy_client v2raya #}
+{% if routing.apply_iptables | default(false) and v2raya_enabled %}
+    _cleanup_mihomo_nat
+    if ! netstat -tlnp 2>/dev/null | grep -q ":{{ v2raya_redir }}.*{{ services.v2raya.container_name | default('v2raya') }}"; then
+      _cleanup_v2raya_nat
+      logger -t lan-routing "v2raya redir-port {{ v2raya_redir }} не готов — NAT-редирект не применяю (чтобы не положить TCP для LAN)"
+      return 0
+    fi
+    iptables -t nat -N "$CHAIN_V2RAYA" 2>/dev/null || iptables -t nat -F "$CHAIN_V2RAYA"
+{% for ip in routing.excluded_ips | default([]) %}
+    iptables -t nat -A "$CHAIN_V2RAYA" -s {{ ip }} -j RETURN
+{% endfor %}
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 0.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 10.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 127.0.0.0/8 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 169.254.0.0/16 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 172.16.0.0/12 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 192.168.0.0/16 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 224.0.0.0/4 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -d 240.0.0.0/4 -j RETURN
+    iptables -t nat -A "$CHAIN_V2RAYA" -p tcp -j REDIRECT --to-ports {{ v2raya_redir }}
+    iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_V2RAYA" 2>/dev/null || \
+      iptables -t nat -A PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_V2RAYA"
+    logger -t lan-routing "iptables nat redirect v2raya -> {{ v2raya_redir }} for {{ routing.lan_cidr }}"
+{% elif routing.apply_iptables | default(false) and not v2raya_enabled %}
+    _cleanup_v2raya_nat
+    logger -t lan-routing "apply_iptables=true, но services.v2raya.enabled=false"
+{% else %}
+    logger -t lan-routing "apply_iptables=false — NAT-redir v2raya не применялся (см. routing в router.yaml)"
+{% endif %}
+{% endif %}
+
+{% if routing.block_quic | default(false) %}
+{% if (pc == 'mihomo' and mihomo_enabled) or (pc == 'v2raya' and v2raya_enabled) %}
+    iptables -C FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || \
+      iptables -I FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP
+    logger -t lan-routing "iptables FORWARD DROP UDP/443 (QUIC) for {{ routing.lan_cidr }}"
+{% else %}
+    logger -t lan-routing "block_quic=true пропущен: выбранный proxy-клиент выключен (без прокси блок UDP/443 обычно вреден)"
+{% endif %}
+{% endif %}
+}
+
+_stop() {
+    _cleanup_mihomo_nat
+    _cleanup_v2raya_nat
+{% if routing.block_quic | default(false) %}
+    iptables -D FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || true
+{% endif %}
+}
+
+case "$1" in
+    start) _start ;;
+    stop) _stop ;;
+    *) echo "usage: $0 start|stop" ;;
+esac

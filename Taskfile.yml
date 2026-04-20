@@ -49,6 +49,11 @@ tasks:
     cmds:
       - "{{.PY}} -m xiaomi_router vless-link"
 
+  vless-server-setup:
+    desc: Сгенерировать ключи и клиентов для Xray REALITY
+    cmds:
+      - "{{.PY}} -m xiaomi_router vless-server-setup"
+
   bootstrap-ssh:
     desc: xmir-patcher connect + install_ssh, если SSH недоступен
     cmds:

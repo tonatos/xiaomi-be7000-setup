@@ -315,6 +315,63 @@ def cmd_setup_compose(
     setup_compose(cfg)
 
 
+@app.command("vless-server-setup")
+def cmd_vless_server_setup(
+    add_client: bool = typer.Option(
+        False, "--add-client", help="Сгенерировать только нового клиента и short_id"
+    )
+) -> None:
+    """Генерация ключей и клиентов для Xray REALITY."""
+    import base64
+    import os
+    import uuid
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import x25519
+
+    new_uuid = str(uuid.uuid4())
+    new_short_id = os.urandom(8).hex()
+
+    if add_client:
+        typer.echo("Добавьте этот блок в список xray.clients в вашем config/router.yaml:")
+        typer.echo(f'    - id: "{new_uuid}"')
+        typer.echo('      flow: "xtls-rprx-vision"')
+        typer.echo("\nИ добавьте этот short_id в список xray.reality.short_ids:")
+        typer.echo(f'      - "{new_short_id}"')
+        return
+
+    # Генерация ключей X25519
+    priv = x25519.X25519PrivateKey.generate()
+    pub = priv.public_key()
+
+    priv_bytes = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub_bytes = pub.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+    # Xray использует base64url без padding'а (знаков =)
+    priv_b64 = base64.urlsafe_b64encode(priv_bytes).decode().rstrip("=")
+    pub_b64 = base64.urlsafe_b64encode(pub_bytes).decode().rstrip("=")
+
+    typer.echo("Скопируйте эту секцию в ваш config/router.yaml (заменив существующую секцию xray):\n")
+    typer.echo("xray:")
+    typer.echo("  clients:")
+    typer.echo(f'    - id: "{new_uuid}"')
+    typer.echo('      flow: "xtls-rprx-vision"')
+    typer.echo("  reality:")
+    typer.echo(f'    private_key: "{priv_b64}"')
+    typer.echo("    short_ids:")
+    typer.echo(f'      - "{new_short_id}"')
+    typer.echo("\n" + "=" * 55)
+    typer.echo(f"Public Key (сохраните для настройки клиентов): {pub_b64}")
+    typer.echo("=" * 55)
+
+
 def main() -> None:
     app()
 

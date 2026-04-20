@@ -205,6 +205,44 @@ def run_smoke(
                 )
             ok_all = ok_all and ok
 
+    v2 = services.get("v2raya", {})
+    if v2.get("enabled", False):
+        label = "v2raya"
+        cname = str(v2.get("container_name", "v2raya"))
+        ok, m = _wait_tcp(
+            ssh,
+            "127.0.0.1",
+            int(v2.get("port", 2017)),
+            log=log,
+            service_label=label,
+        )
+        msgs.append(m)
+        if not ok:
+            _append_container_diagnostics(
+                ssh, label, cname, msgs, diagnosed_containers
+            )
+        ok_all = ok_all and ok
+
+        routing = cfg.get("routing") if isinstance(cfg.get("routing"), dict) else {}
+        proxy_client = str(cfg.get("proxy_client", "mihomo")).strip()
+        if routing.get("apply_iptables", False) and proxy_client == "v2raya":
+            redir_port = int(v2.get("redir_port", 52345))
+            redir_ok, redir_msg = _wait_tcp(
+                ssh,
+                "127.0.0.1",
+                redir_port,
+                log=log,
+                service_label=label,
+            )
+            if redir_ok:
+                msgs.append(redir_msg)
+            else:
+                msgs.append(
+                    f"[{label}] WARN: transparent redir-порт {redir_port} не готов "
+                    "(проверьте настройки transparent proxy в v2rayA); "
+                    "smoke не считаю проваленным только из-за этого"
+                )
+
     ts = services.get("torrserver", {})
     if ts.get("enabled", True):
         p = int(ts.get("port", 8090))
@@ -270,8 +308,9 @@ def run_smoke(
             )
         elif not dns_ok:
             msgs.append(
-                "[сеть] Подсказка: при сбое DNS проверьте dnsmasq, форвард на AdGuard Home "
-                "и что контейнер слушает adguardhome.dns_port."
+                "[сеть] Подсказка: при сбое DNS проверьте dnsmasq (форвард на AdGuard Home "
+                "или на mihomo 127.0.0.1:порт из mihomo.dns.listen) и что соответствующий "
+                "сервис слушает порт."
             )
 
     return SmokeResult(ok=ok_all, messages=msgs)

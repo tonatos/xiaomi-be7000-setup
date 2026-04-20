@@ -20,6 +20,24 @@ services:
       # mihomo подкачивает GeoSite/GeoIP в runtime, поэтому каталог должен быть RW
       - ./configs/mihomo:/root/.config/mihomo
 {% endif %}
+{% if services.v2raya.enabled | default(false) %}
+
+  {{ services.v2raya.container_name }}:
+    image: {{ services.v2raya.image | tojson }}
+    container_name: {{ services.v2raya.container_name | tojson }}
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    environment:
+      - V2RAYA_LOG_FILE=/tmp/v2raya.log
+      - V2RAYA_V2RAY_BIN=/usr/local/bin/v2ray
+      - V2RAYA_NFTABLES_SUPPORT=off
+      - IPTABLES_MODE=legacy
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - /etc/resolv.conf:/etc/resolv.conf
+      - ./configs/v2raya:/etc/v2raya
+{% endif %}
 {% if services.torrserver.enabled | default(true) %}
 
   {{ services.torrserver.container_name }}:

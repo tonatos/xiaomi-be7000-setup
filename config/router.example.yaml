@@ -5,6 +5,8 @@
 # Официальные ссылки:
 # - Xray config: https://xtls.github.io/config/
 # - mihomo config: https://wiki.metacubex.one/config/
+# - v2rayA: https://github.com/v2rayA/v2rayA
+# - iptables LAN: на роутере рендерится $USB/stack/routing/lan-routing.sh (общий для mihomo и v2raya)
 
 router:
   # LAN IP/домен роутера для SSH.
@@ -12,12 +14,21 @@ router:
   # Пароль SSH (можно также через env ROUTER_SSH_PASSWORD).
   ssh_password: "change-me"
 
+# Клиент прокси: mihomo или v2raya (по умолчанию в базе — mihomo).
+# При deploy должен быть включён (enabled: true) только тот сервис, который соответствует proxy_client.
+proxy_client: "mihomo"
+
 services:
   mihomo:
-    # Включить mihomo-клиент.
+    # Включить mihomo-клиент (при proxy_client: "mihomo" оставьте true).
     enabled: true
+  v2raya:
+    # Включить v2rayA (только при proxy_client: "v2raya"; тогда services.mihomo.enabled: false).
+    enabled: false
+    # Web UI по умолчанию на порту 2017 (см. router.base.yaml).
+    # TCP transparent: services.v2raya.redir_port (по умолчанию 52345) — см. lan-routing.sh при routing.apply_iptables: true.
   metacubexd:
-    # Включить web-dashboard metacubexd.
+    # Включить web-dashboard metacubexd (имеет смысл для mihomo; для v2raya можно выключить).
     enabled: true
   xray_server:
     # Включить Xray-сервер.
@@ -43,8 +54,10 @@ public_endpoint:
 
 # Настройки приложения AdGuard Home (не путать с services.adguardhome — только Docker).
 adguardhome:
-  # При services.mihomo.enabled: false http_proxy в AdGuardHome.yaml не подставляется,
-  # кроме случая http_proxy_ignore_mihomo_state: true.
+  # При выключенном proxy-клиенте http_proxy в AdGuardHome.yaml не подставляется,
+  # кроме случая http_proxy_ignore_proxy_state: true.
+  # Для mihomo по умолчанию socks5://127.0.0.1:7890; для v2raya — 20170 (подставляется при merge, если не переопределили).
+  # http_proxy: "socks5://127.0.0.1:20170"
   # DNS-порт для форвардинга из dnsmasq; web UI — admin_port.
   dns_port: 5353
   admin_port: 3000
@@ -61,17 +74,26 @@ xray:
       # Flow клиента (для Reality обычно xtls-rprx-vision).
       flow: "xtls-rprx-vision"
   reality:
-    # Приватный ключ пары Reality (генерируется: `xray x25519`).
+    # Приватный ключ пары Reality (сгенерируйте командой: `task vless-server-setup`).
     private_key: "YOUR_REALITY_PRIVATE_KEY_BASE64URL"
     # Список short_id (hex), используемый клиентами.
     short_ids:
       - "0123456789abcdef"
+  # Исходящий SOCKS до локального proxy-клиента (по умолчанию подставляется под proxy_client при load).
+  # routing:
+  #   socks_upstream_host: "127.0.0.1"
+  #   socks_upstream_port: 7890   # mihomo mixed; для v2raya обычно 20170
 
 routing:
-  # Включить прозрачный прокси через iptables для LAN.
+  # Прозрачный NAT-redir LAN→TCP: mihomo → services.mihomo.redir_port; v2rayA → services.v2raya.redir_port (деф. 52345).
+  # Скрипт на USB: stack/routing/lan-routing.sh. Для v2rayA в UI всё равно включите прозрачный прокси Redirect, чтобы ядро слушало redir_port.
   apply_iptables: false
-  # IP-адреса устройств, которые нужно исключить из transparent proxy.
+  # CIDR домашней сети (iptables PREROUTING/FORWARD).
+  # lan_cidr: "192.168.31.0/24"
+  # IP устройств вне transparent proxy (Xbox и т.п.).
   excluded_ips: []
+  # Рекомендуется при apply_iptables: true — иначе QUIC (UDP/443) может обходить прокси.
+  block_quic: false
 
 mihomo:
   # Обязательно раскомментируйте и заполните proxies (реальный server и учётные данные).
@@ -87,3 +109,13 @@ mihomo:
   #     udp: true
   # API-секрет external-controller (для metacubexd), пусто = без авторизации.
   secret: ""
+
+# --- Пример переключения на v2rayA (закомментировано; раскомментируйте и согласуйте с services.*)
+# proxy_client: "v2raya"
+# services:
+#   mihomo:
+#     enabled: false
+#   v2raya:
+#     enabled: true
+#   metacubexd:
+#     enabled: false

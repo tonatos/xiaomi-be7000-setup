@@ -71,6 +71,28 @@ def rollback(ssh: RouterSSH, meta: dict[str, Any]) -> None:
     fw = meta.get("firewall_export")
     dhcp = meta.get("dhcp_export")
     usb = meta.get("usb_mount", "")
+    stack_path = str(meta.get("stack_path", "")).strip()
+
+    # Сначала снимаем runtime-правила iptables, чтобы восстановить интернет даже
+    # в случае частичного/неполного rollback по файлам.
+    if stack_path:
+        ssh.exec_text(
+            f"if [ -x '{stack_path}/routing/lan-routing.sh' ]; then "
+            f"sh '{stack_path}/routing/lan-routing.sh' stop 2>/dev/null || true; "
+            "fi"
+        )
+        # Legacy-совместимость со старыми стеками до объединения routing-скрипта.
+        ssh.exec_text(
+            f"if [ -x '{stack_path}/mihomo/mihomo-routing.sh' ]; then "
+            f"sh '{stack_path}/mihomo/mihomo-routing.sh' stop 2>/dev/null || true; "
+            "fi"
+        )
+        ssh.exec_text(
+            f"if [ -x '{stack_path}/v2raya/v2raya-routing.sh' ]; then "
+            f"sh '{stack_path}/v2raya/v2raya-routing.sh' stop 2>/dev/null || true; "
+            "fi"
+        )
+
     if tar_s:
         ssh.exec_text(
             f"if [ -s '{tar_s}' ]; then tar xzf '{tar_s}' -C / 2>/dev/null || true; fi"

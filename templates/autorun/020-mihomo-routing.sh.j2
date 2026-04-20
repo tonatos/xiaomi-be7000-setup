@@ -4,8 +4,8 @@
 _mihomo_autostart() {
     TAG="mihomo-autostart"
     DOCK="{{ docker_bin }}"
-    MIHOMO_DIR="{{ stack_path }}/mihomo"
-    ROUTING_SCRIPT="$MIHOMO_DIR/mihomo-routing.sh"
+    ROUTING_DIR="{{ stack_path }}/routing"
+    ROUTING_SCRIPT="$ROUTING_DIR/lan-routing.sh"
     REDIR_PORT={{ services_mihomo_redir_port }}
 
     MAX_DOCKER_WAIT=300

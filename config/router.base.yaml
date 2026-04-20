@@ -17,6 +17,9 @@ router:
   # Пользователь SSH (обычно root для Xiaomi/OpenWrt).
   ssh_user: "root"
 
+# Выбор клиента для проксирования (mihomo или v2raya)
+proxy_client: "mihomo"
+
 usb:
   # Явная точка монтирования USB на роутере (если пусто, определяется автоматически).
   mount_path: ""
@@ -59,6 +62,18 @@ services:
     mixed_port: 7890
     # redir-port в итоговом mihomo-config (transparent proxy порт).
     redir_port: 7891
+  v2raya:
+    # Включить/выключить сервис v2raya.
+    enabled: false
+    # container_name для compose-сервиса v2raya.
+    container_name: "v2raya"
+    # Образ контейнера v2raya.
+    image: "mzz2017/v2raya:latest"
+    # Порт для web UI v2raya.
+    port: 2017
+    # TCP transparent redirect (dokodemo-door «transparent» в ядре v2rayA; см. v2rayTmpl.go, порт 52345).
+    # При routing.apply_iptables: true lan-routing.sh делает REDIRECT на этот порт (как redir-port у mihomo).
+    redir_port: 52345
   torrserver:
     # Включить/выключить TorrServer.
     enabled: true
@@ -109,11 +124,11 @@ adguardhome:
   # Порт HTTPS UI/DoH в терминах AGH (в шаблоне UI пока только HTTP; 0 = не занимать 443).
   https_port: 0
   # Прокси для исходящих HTTP(S) запросов AGH (фильтры, DoH upstream).
-  # Рекомендуется для стека: "socks5://127.0.0.1:7890" (через mihomo).
-  # При services.mihomo.enabled: false http_proxy в YAML не подставляется, кроме случая
-  # http_proxy_ignore_mihomo_state: true.
+  # Рекомендуется для стека: "socks5://127.0.0.1:7890" (через mihomo) или "socks5://127.0.0.1:20170" (через v2raya).
+  # При выключенном клиенте http_proxy в YAML не подставляется, кроме случая
+  # http_proxy_ignore_proxy_state: true.
   http_proxy: "socks5://127.0.0.1:7890"
-  http_proxy_ignore_mihomo_state: false
+  http_proxy_ignore_proxy_state: false
   upstream_dns:
     - "https://9.9.9.10/dns-query"
     - "https://149.112.112.10/dns-query"
@@ -154,7 +169,7 @@ xray:
     server_names:
       - "ya.ru"
       - "vk.com"
-    # Приватный ключ Reality (x25519), сгенерируйте через `xray x25519`.
+    # Приватный ключ Reality (x25519), сгенерируйте через `task vless-server-setup`.
     private_key: "REPLACE_WITH_REALITY_PRIVATE_KEY"
     # Список short_id (hex), используемых клиентами.
     short_ids:
@@ -165,6 +180,7 @@ xray:
     # Локальный SOCKS upstream host для outbound в Xray.
     socks_upstream_host: "127.0.0.1"
     # Локальный SOCKS upstream port для outbound в Xray.
+    # По умолчанию: 7890 (для mihomo) или 20170 (для v2raya).
     socks_upstream_port: 7890
 
 public_endpoint:
