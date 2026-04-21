@@ -68,4 +68,26 @@ def run_bootstrap_if_needed(
     if r2.returncode != 0:
         raise SystemExit(f"install_ssh.py завершился с кодом {r2.returncode}")
 
-    print("Готово. Проверьте вход по SSH и при необходимости задайте пароль root (passw.py в xmir-patcher).")
+    print("Готово. SSH установлен.")
+
+
+def set_root_password_with_xmir(new_password: str) -> None:
+    """Сменить пароль root через passw.py из xmir-patcher."""
+    password = new_password.strip()
+    if not password:
+        raise SystemExit("Новый пароль root не может быть пустым.")
+
+    root = ensure_submodule_present()
+    py = sys.executable
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(root)
+
+    print("Запуск passw.py (установка нового root-пароля)…")
+    r = subprocess.run(
+        [py, "passw.py", password],
+        cwd=root,
+        env=env,
+        check=False,
+    )
+    if r.returncode != 0:
+        raise SystemExit(f"passw.py завершился с кодом {r.returncode}")

@@ -240,6 +240,10 @@ def apply_dnsmasq_upstream(
     raw_mihomo = cfg.get("services", {}).get("mihomo")
     mihomo_svc = raw_mihomo if isinstance(raw_mihomo, dict) else {}
     raw_app = cfg.get("adguardhome")
+    raw_mihomo_app = cfg.get("mihomo")
+    mihomo_app = raw_mihomo_app if isinstance(raw_mihomo_app, dict) else {}
+    raw_routing = cfg.get("routing")
+    routing_cfg = raw_routing if isinstance(raw_routing, dict) else {}
     agh_app = raw_app if isinstance(raw_app, dict) else {}
     dns_port = int(agh_app.get("dns_port", 5353))
     dns_host = str(agh_app.get("dns_host", "127.0.0.1")).strip() or "127.0.0.1"
@@ -247,6 +251,15 @@ def apply_dnsmasq_upstream(
 
     mihomo_upstream = _mihomo_dns_upstream_for_dnsmasq(cfg)
     proxy_client = str(cfg.get("proxy_client", "mihomo")).strip()
+    mihomo_tun = mihomo_app.get("tun") if isinstance(mihomo_app.get("tun"), dict) else {}
+    mihomo_tun_enabled = bool(mihomo_tun.get("enable", False))
+    apply_iptables = bool(routing_cfg.get("apply_iptables", False))
+    skip_mihomo_dns_forward_for_tun = (
+        proxy_client == "mihomo"
+        and mihomo_svc.get("enabled", True)
+        and mihomo_tun_enabled
+        and not apply_iptables
+    )
 
     desired: str | None
     if agh_svc.get("enabled", True):
@@ -255,6 +268,7 @@ def apply_dnsmasq_upstream(
         proxy_client == "mihomo"
         and mihomo_svc.get("enabled", True)
         and mihomo_upstream is not None
+        and not skip_mihomo_dns_forward_for_tun
     ):
         desired = mihomo_upstream
     else:
@@ -269,6 +283,12 @@ def apply_dnsmasq_upstream(
     )
 
     if desired is None:
+        if skip_mihomo_dns_forward_for_tun:
+            log(
+                "      Пропускаю dnsmasq -> mihomo: при mihomo.tun.enable=true и "
+                "routing.apply_iptables=false локальный трафик роутера не проходит через "
+                "proxy-path, а fake-ip ломает исходящие подключения."
+            )
         if has_agh_forward or has_mihomo_forward or has_noresolv:
             log(
                 "      AdGuard Home / mihomo DNS не используются как upstream — "

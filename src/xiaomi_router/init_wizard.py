@@ -18,8 +18,9 @@ from xiaomi_router.config_loader import load_merged_config, validate_merged_conf
 from xiaomi_router.paths import default_config_path, default_secrets_path, repo_root
 from xiaomi_router.pipeline import deploy
 from xiaomi_router.proxy_url_parser import parse_proxy_url
+from xiaomi_router.ssh_util import check_ssh_reachable
 from xiaomi_router.vless_link import build_vless_reality_link
-from xiaomi_router.xmir_bootstrap import run_bootstrap_if_needed
+from xiaomi_router.xmir_bootstrap import run_bootstrap_if_needed, set_root_password_with_xmir
 
 KNOWN_SERVICES: dict[str, tuple[str, str]] = {
     "mihomo": (
@@ -56,6 +57,7 @@ DEFAULT_FLOWS: dict[str, str] = {
 @dataclass
 class InitWizardAnswers:
     host: str
+    access_mode: str
     ssh_password: str
     proxy_client: str
     selected_services: list[str]
@@ -352,15 +354,40 @@ def _run_textual_wizard(defaults: dict[str, Any]) -> InitWizardAnswers | None:
                     )
                     yield Input(defaults["host"], placeholder="router host", id="host")
                     yield Static(
-                        "Пароль root по SSH. Нужен для проверки состояния роутера, настройки "
-                        "окружения и выкладки стека. Если не знаете пароль — сначала выполните bootstrap.",
+                        "Выберите сценарий доступа: либо у вас уже есть root-пароль, либо мастер "
+                        "сам запустит bootstrap и установит новый пароль, который сохранится в router.yaml.",
                         classes="helptext",
+                    )
+                    yield Select(
+                        options=[
+                            ("У меня уже есть root-пароль SSH", "existing_password"),
+                            ("Запустить bootstrap и задать новый пароль", "bootstrap_set_password"),
+                        ],
+                        value="existing_password",
+                        id="access_mode",
+                    )
+                    yield Static(
+                        "Текущий пароль root по SSH (используется для подключения, деплоя и проверок).",
+                        classes="helptext",
+                        id="ssh_password_help",
                     )
                     yield Input(
                         defaults["ssh_password"],
                         placeholder="SSH password",
                         password=True,
                         id="ssh_password",
+                    )
+                    yield Static(
+                        "Новый пароль root, который будет установлен после bootstrap через xmir-patcher. "
+                        "Используйте сильный пароль: он будет записан в router.yaml.",
+                        classes="helptext",
+                        id="bootstrap_password_help",
+                    )
+                    yield Input(
+                        defaults["ssh_password"],
+                        placeholder="New SSH password after bootstrap",
+                        password=True,
+                        id="bootstrap_new_password",
                     )
 
                 with Vertical(classes="wizard-step", id="step_proxy"):
@@ -383,6 +410,7 @@ def _run_textual_wizard(defaults: dict[str, Any]) -> InitWizardAnswers | None:
                         "Её выдает ваш VPS/панель провайдера. Если заполнить поле, ссылка будет добавлена "
                         "в секцию mihomo.proxies в router.yaml.",
                         classes="helptext",
+                        id="proxy_url_help",
                     )
                     yield Input(
                         "",
@@ -420,7 +448,8 @@ def _run_textual_wizard(defaults: dict[str, Any]) -> InitWizardAnswers | None:
                 with Vertical(classes="wizard-step", id="step_actions"):
                     yield Static("Шаги выполнения", classes="section-title")
                     yield Static(
-                        "Bootstrap поднимает/проверяет SSH через xmir-patcher. Deploy применяет конфиг: "
+                        "Bootstrap поднимает/проверяет SSH через xmir-patcher (если выбран сценарий "
+                        "bootstrap на шаге доступа, он выполняется обязательно). Deploy применяет конфиг: "
                         "рендерит шаблоны, загружает файлы на роутер и запускает контейнеры.",
                         classes="helptext",
                     )
@@ -447,29 +476,61 @@ def _run_textual_wizard(defaults: dict[str, Any]) -> InitWizardAnswers | None:
             self.sub_title = " Мастер конфигурации Xiaomi BE7000"
             self.theme = "gruvbox"
             self._enforce_proxy_client_services()
+            self._sync_access_mode_fields()
             self._show_step(0)
 
         def on_select_changed(self, event: Select.Changed) -> None:
             if event.select.id == "proxy_client":
                 self._enforce_proxy_client_services()
+            if event.select.id == "access_mode":
+                self._sync_access_mode_fields()
 
         def _service_checkbox(self, key: str) -> Checkbox:
             return self.query_one(f"#svc_{key}", Checkbox)
+
+        def _sync_access_mode_fields(self) -> None:
+            mode = str(self.query_one("#access_mode", Select).value)
+            ssh_help = self.query_one("#ssh_password_help", Static)
+            ssh_input = self.query_one("#ssh_password", Input)
+            boot_help = self.query_one("#bootstrap_password_help", Static)
+            boot_input = self.query_one("#bootstrap_new_password", Input)
+            root_cb = self.query_one("#should_root", Checkbox)
+
+            existing = mode == "existing_password"
+            ssh_help.display = existing
+            ssh_input.display = existing
+            boot_help.display = not existing
+            boot_input.display = not existing
+
+            if existing:
+                root_cb.disabled = False
+            else:
+                root_cb.value = True
+                root_cb.disabled = True
 
         def _enforce_proxy_client_services(self) -> None:
             proxy_client = str(self.query_one("#proxy_client", Select).value)
             mihomo_cb = self._service_checkbox("mihomo")
             v2raya_cb = self._service_checkbox("v2raya")
+            proxy_url_help = self.query_one("#proxy_url_help", Static)
+            proxy_url_input = self.query_one("#proxy_url", Input)
             if proxy_client == "mihomo":
                 mihomo_cb.value = True
                 mihomo_cb.disabled = True
                 v2raya_cb.value = False
                 v2raya_cb.disabled = True
+                proxy_url_help.display = True
+                proxy_url_input.display = True
+                proxy_url_input.disabled = False
             else:
                 v2raya_cb.value = True
                 v2raya_cb.disabled = True
                 mihomo_cb.value = False
                 mihomo_cb.disabled = True
+                proxy_url_help.display = False
+                proxy_url_input.value = ""
+                proxy_url_input.display = False
+                proxy_url_input.disabled = True
 
         def _update_progress(self) -> None:
             progress = self.query_one("#progress", Static)
@@ -498,6 +559,23 @@ def _run_textual_wizard(defaults: dict[str, Any]) -> InitWizardAnswers | None:
                 if not host:
                     self.notify("router.host не может быть пустым", severity="error")
                     return False
+                mode = str(self.query_one("#access_mode", Select).value).strip()
+                if mode == "existing_password":
+                    pwd = self.query_one("#ssh_password", Input).value.strip()
+                    if not pwd:
+                        self.notify(
+                            "Укажите существующий пароль SSH или выберите сценарий bootstrap.",
+                            severity="error",
+                        )
+                        return False
+                else:
+                    new_pwd = self.query_one("#bootstrap_new_password", Input).value.strip()
+                    if not new_pwd:
+                        self.notify(
+                            "Укажите новый пароль, который нужно задать после bootstrap.",
+                            severity="error",
+                        )
+                        return False
             elif self._step_index == 1:
                 proxy_client = str(self.query_one("#proxy_client", Select).value).strip()
                 proxy_url = self.query_one("#proxy_url", Input).value.strip()
@@ -534,19 +612,29 @@ def _run_textual_wizard(defaults: dict[str, Any]) -> InitWizardAnswers | None:
 
         def _collect_answers(self) -> InitWizardAnswers:
             host = self.query_one("#host", Input).value.strip()
+            access_mode = str(self.query_one("#access_mode", Select).value).strip()
             proxy_client = str(self.query_one("#proxy_client", Select).value).strip()
-            proxy_url = self.query_one("#proxy_url", Input).value.strip()
+            proxy_url = (
+                self.query_one("#proxy_url", Input).value.strip()
+                if proxy_client == "mihomo"
+                else ""
+            )
             public_host = self.query_one("#public_host", Input).value.strip()
             selected_services: list[str] = []
             for service_name in KNOWN_SERVICES:
                 if self._service_checkbox(service_name).value:
                     selected_services.append(service_name)
             selected_services = _normalize_services(proxy_client, selected_services)
-            ssh_password = self.query_one("#ssh_password", Input).value.strip()
+            ssh_password = (
+                self.query_one("#ssh_password", Input).value.strip()
+                if access_mode == "existing_password"
+                else self.query_one("#bootstrap_new_password", Input).value.strip()
+            )
             should_root = self.query_one("#should_root", Checkbox).value
             should_deploy = self.query_one("#should_deploy", Checkbox).value
             return InitWizardAnswers(
                 host=host,
+                access_mode=access_mode,
                 ssh_password=ssh_password,
                 proxy_client=proxy_client,
                 selected_services=selected_services,
@@ -663,7 +751,26 @@ def run_init_wizard(config: Path | None = None, secrets: Path | None = None) -> 
         if answers.should_deploy:
             raise SystemExit("Исправьте конфиг и повторите deploy.")
 
-    if answers.should_root:
+    if answers.access_mode == "bootstrap_set_password":
+        _ensure_xmir_dependencies(console)
+        console.print("[cyan]Запускаю bootstrap SSH через xmir-patcher...[/cyan]")
+        run_bootstrap_if_needed(
+            answers.host,
+            ssh_port=port_default,
+            ssh_password="",
+            ssh_user=user_default,
+            force=True,
+        )
+        console.print("[cyan]Устанавливаю новый root-пароль через xmir-patcher...[/cyan]")
+        set_root_password_with_xmir(answers.ssh_password)
+        if not check_ssh_reachable(
+            answers.host, port_default, answers.ssh_password, user_default
+        ):
+            raise SystemExit(
+                "Bootstrap выполнен, но вход по новому SSH-паролю не подтверждён. "
+                "Проверьте пароль/порт и повторите."
+            )
+    elif answers.should_root:
         if not answers.ssh_password:
             raise SystemExit(
                 "Для bootstrap/deploy нужен пароль SSH. Укажите router.ssh_password."

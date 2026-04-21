@@ -234,6 +234,10 @@ mihomo:
     stack: mixed
     # Автоматически определять исходящий интерфейс (eth0 / WAN).
     auto-detect-interface: true
+    # Проксируем только транзит LAN->WAN; локальные процессы роутера (в т.ч. TorrServer)
+    # в TUN не отправляем.
+    include-interface:
+      - br-lan
 
   sniffer:
     # Включение sniffer (L7-определение доменов).
