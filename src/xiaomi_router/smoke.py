@@ -213,6 +213,7 @@ def run_smoke(
             ssh,
             "127.0.0.1",
             int(v2.get("port", 2017)),
+            timeout_s=60,
             log=log,
             service_label=label,
         )
@@ -225,7 +226,13 @@ def run_smoke(
 
         routing = cfg.get("routing") if isinstance(cfg.get("routing"), dict) else {}
         proxy_client = str(cfg.get("proxy_client", "mihomo")).strip()
-        if routing.get("apply_iptables", False) and proxy_client == "v2raya":
+        v2_cfg = cfg.get("v2raya") if isinstance(cfg.get("v2raya"), dict) else {}
+        v2_mode = str(v2_cfg.get("transparent_mode", "tun")).strip().lower()
+        if (
+            routing.get("apply_iptables", False)
+            and proxy_client == "v2raya"
+            and v2_mode == "redirect"
+        ):
             redir_port = int(v2.get("redir_port", 52345))
             redir_ok, redir_msg = _wait_tcp(
                 ssh,
@@ -241,6 +248,20 @@ def run_smoke(
                     f"[{label}] WARN: transparent redir-порт {redir_port} не готов "
                     "(проверьте настройки transparent proxy в v2rayA); "
                     "smoke не считаю проваленным только из-за этого"
+                )
+        elif proxy_client == "v2raya" and v2_mode == "tun":
+            msgs.append(
+                f"[{label}] transparent_mode=tun: проверку redir-порта пропускаю (режим Redirect не используется)"
+            )
+            _, fake_out, _ = ssh.exec(
+                "if grep -q '\"fakedns\"' /mnt/usb*/stack/configs/v2raya/config.json 2>/dev/null; "
+                "then echo FAKEDNS_ON; else echo FAKEDNS_OFF; fi"
+            )
+            if "FAKEDNS_ON" in fake_out:
+                msgs.append(
+                    f"[{label}] WARN: включён FakeDNS в v2rayA config.json. "
+                    "При TUN это может давать destination 198.18.x.x в direct. "
+                    "Рекомендуется выключить FakeDNS/Prevent DNS pollution в GUI."
                 )
 
     ts = services.get("torrserver", {})

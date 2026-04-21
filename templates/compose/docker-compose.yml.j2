@@ -16,6 +16,10 @@ services:
     container_name: {{ services.mihomo.container_name | tojson }}
     restart: unless-stopped
     network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
     volumes:
       # mihomo подкачивает GeoSite/GeoIP в runtime, поэтому каталог должен быть RW
       - ./configs/mihomo:/root/.config/mihomo

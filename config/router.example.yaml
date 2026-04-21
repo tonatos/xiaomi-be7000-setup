@@ -26,7 +26,6 @@ services:
     # Включить v2rayA (только при proxy_client: "v2raya"; тогда services.mihomo.enabled: false).
     enabled: false
     # Web UI по умолчанию на порту 2017 (см. router.base.yaml).
-    # TCP transparent: services.v2raya.redir_port (по умолчанию 52345) — см. lan-routing.sh при routing.apply_iptables: true.
   metacubexd:
     # Включить web-dashboard metacubexd (имеет смысл для mihomo; для v2raya можно выключить).
     enabled: true
@@ -51,6 +50,14 @@ services:
 public_endpoint:
   # Публичный IP/домен для команды vless-link (WAN/VPS endpoint).
   host: ""
+
+v2raya:
+  # Режим прозрачного прокси:
+  # - tun (рекомендуется): перехват TCP+UDP/QUIC через TUN
+  # - redirect (legacy): TCP REDIRECT через iptables/redir_port
+  transparent_mode: "tun"
+  # Если TUN-интерфейс в вашей сборке не tun0/tun1, задайте шаблон (пример: "v2ray+").
+  tun_interface: "tun+"
 
 # Настройки приложения AdGuard Home (не путать с services.adguardhome — только Docker).
 adguardhome:
@@ -85,15 +92,8 @@ xray:
   #   socks_upstream_port: 7890   # mihomo mixed; для v2raya обычно 20170
 
 routing:
-  # Прозрачный NAT-redir LAN→TCP: mihomo → services.mihomo.redir_port; v2rayA → services.v2raya.redir_port (деф. 52345).
-  # Скрипт на USB: stack/routing/lan-routing.sh. Для v2rayA в UI всё равно включите прозрачный прокси Redirect, чтобы ядро слушало redir_port.
-  apply_iptables: false
-  # CIDR домашней сети (iptables PREROUTING/FORWARD).
-  # lan_cidr: "192.168.31.0/24"
-  # IP устройств вне transparent proxy (Xbox и т.п.).
+  # IP устройств вне transparent proxy (Xbox/PS и т.п. с чувствительным NAT).
   excluded_ips: []
-  # Рекомендуется при apply_iptables: true — иначе QUIC (UDP/443) может обходить прокси.
-  block_quic: false
 
 mihomo:
   # Обязательно раскомментируйте и заполните proxies (реальный server и учётные данные).

@@ -16,3 +16,7 @@ local/
 # IDE
 .idea/
 .vscode/
+
+# Cursor (авто-генерируемые файлы IDE; правила .cursor/rules/ — в репо)
+.cursor/chat/
+.cursor/logs/

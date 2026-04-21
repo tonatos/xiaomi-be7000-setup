@@ -224,6 +224,15 @@ def validate_merged_config_for_deploy(cfg: dict[str, Any]) -> None:
                         )
 
     if v2_en:
+        v2_cfg = cfg.get("v2raya") if isinstance(cfg.get("v2raya"), dict) else {}
+        v2_mode = str(v2_cfg.get("transparent_mode", "tun")).strip().lower()
+        if v2_mode not in ("tun", "redirect"):
+            errs.append(
+                "v2raya.transparent_mode: ожидается 'tun' или 'redirect'"
+            )
+        v2_tun_if = v2_cfg.get("tun_interface", "tun+")
+        if not isinstance(v2_tun_if, str) or not v2_tun_if.strip():
+            errs.append("v2raya.tun_interface: ожидается непустая строка")
         check_enabled_service_ports(
             "v2raya",
             v2_en,

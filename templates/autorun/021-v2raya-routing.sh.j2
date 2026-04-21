@@ -8,6 +8,7 @@ _v2raya_autostart() {
     ROUTING_SCRIPT="$ROUTING_DIR/lan-routing.sh"
     PORT={{ services_v2raya_port }}
     REDIR_PORT={{ services_v2raya_redir_port }}
+    TRANSPARENT_MODE="{{ v2raya.transparent_mode | default('tun') }}"
     APPLY_IPT={% if routing.apply_iptables | default(false) %}1{% else %}0{% endif %}
 
     MAX_DOCKER_WAIT=300
@@ -56,7 +57,7 @@ _v2raya_autostart() {
     fi
     logger -t $TAG "v2raya port $PORT готов"
 
-    if [ "$APPLY_IPT" = "1" ]; then
+    if [ "$APPLY_IPT" = "1" ] && [ "$TRANSPARENT_MODE" = "redirect" ]; then
         waited=0
         while [ $waited -lt $MAX_V2RAYA_WAIT ]; do
             if netstat -tlnp 2>/dev/null | grep -q ":${REDIR_PORT}.*{{ services_v2raya_container_name }}"; then
@@ -70,6 +71,8 @@ _v2raya_autostart() {
             return 1
         fi
         logger -t $TAG "v2raya transparent redir-port $REDIR_PORT готов"
+    elif [ "$APPLY_IPT" = "1" ] && [ "$TRANSPARENT_MODE" = "tun" ]; then
+        logger -t $TAG "v2raya transparent_mode=tun: ожидание redir-порта пропущено, iptables REDIRECT не требуется"
     fi
 
     if [ ! -x "$ROUTING_SCRIPT" ]; then

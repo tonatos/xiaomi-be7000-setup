@@ -3,6 +3,10 @@
 # Клиент задаётся в router.yaml: proxy_client (mihomo | v2raya).
 # NAT-redir: routing.apply_iptables + включённый соответствующий сервис.
 #
+# При TUN-режиме (mihomo.tun.enable: true или v2raya.transparent_mode=tun)
+# этот скрипт отвечает только за TCP REDIRECT (legacy/hybrid).
+# UDP/QUIC перехватывается TUN автоматически; block_quic при TUN не применяется.
+#
 # Исключённые IP (routing.excluded_ips): устройства с чувствительным NAT (Xbox и др.) —
 # не проходят через редирект.
 
@@ -10,16 +14,28 @@
 {% set mihomo_enabled = services.mihomo.enabled | default(true) %}
 {% set v2raya_enabled = services.v2raya.enabled | default(false) %}
 {% set v2raya_redir = services.v2raya.redir_port | default(52345) %}
+{% set v2raya_mode = v2raya.transparent_mode | default('tun') %}
+{% set v2raya_tun_if = v2raya.tun_interface | default('tun+') %}
+{% set router_output_enabled = routing.apply_router_output_iptables | default(true) %}
+{% set router_output_fake_cidr = routing.router_output_fake_cidr | default('198.18.0.0/16') %}
+{% set tun_enabled = mihomo.tun.enable | default(false) if pc == 'mihomo' else (v2raya_mode == 'tun') %}
 CHAIN_MIHOMO="MIHOMO_{{ services.mihomo.container_name | default('mihomo') | upper | replace('-', '_') }}"
 CHAIN_V2RAYA="V2RAYA_{{ services.v2raya.container_name | default('v2raya') | upper | replace('-', '_') }}"
 
 _cleanup_mihomo_nat() {
+    iptables -t nat -D OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_MIHOMO" 2>/dev/null || true
     iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_MIHOMO" 2>/dev/null || true
     iptables -t nat -F "$CHAIN_MIHOMO" 2>/dev/null || true
     iptables -t nat -X "$CHAIN_MIHOMO" 2>/dev/null || true
 }
 
+_cleanup_tun_forward_accept() {
+    iptables -D FORWARD -s {{ routing.lan_cidr }} -o Meta -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -s {{ routing.lan_cidr }} -o {{ v2raya_tun_if }} -j ACCEPT 2>/dev/null || true
+}
+
 _cleanup_v2raya_nat() {
+    iptables -t nat -D OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_V2RAYA" 2>/dev/null || true
     iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_V2RAYA" 2>/dev/null || true
     iptables -t nat -F "$CHAIN_V2RAYA" 2>/dev/null || true
     iptables -t nat -X "$CHAIN_V2RAYA" 2>/dev/null || true
@@ -27,6 +43,15 @@ _cleanup_v2raya_nat() {
 
 _start() {
 {% if pc == 'mihomo' %}
+{% if tun_enabled and mihomo_enabled %}
+    # Для TUN-пути LAN -> Meta нужна явная FORWARD-разрешалка:
+    # fw3 policy LAN->WAN не считает интерфейс Meta "wan" и режет трафик в REJECT.
+    iptables -C FORWARD -s {{ routing.lan_cidr }} -o Meta -j ACCEPT 2>/dev/null || \
+      iptables -I FORWARD -s {{ routing.lan_cidr }} -o Meta -j ACCEPT
+    logger -t lan-routing "iptables FORWARD ACCEPT {{ routing.lan_cidr }} -> Meta (mihomo TUN)"
+{% else %}
+    _cleanup_tun_forward_accept
+{% endif %}
 {% if routing.apply_iptables | default(false) and mihomo_enabled %}
     _cleanup_v2raya_nat
     iptables -t nat -N "$CHAIN_MIHOMO" 2>/dev/null || iptables -t nat -F "$CHAIN_MIHOMO"
@@ -44,17 +69,28 @@ _start() {
     iptables -t nat -A "$CHAIN_MIHOMO" -p tcp -j REDIRECT --to-ports {{ services.mihomo.redir_port }}
     iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_MIHOMO" 2>/dev/null || \
       iptables -t nat -A PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_MIHOMO"
+{% if router_output_enabled %}
+    # Роутер сам (SSH-сессии, curl/wget и т.п.) получает fake-ip от mihomo DNS.
+    # Отправляем TCP к fake-ip диапазону в redir-port, иначе соединения зависают.
+    iptables -t nat -C OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_MIHOMO" 2>/dev/null || \
+      iptables -t nat -A OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_MIHOMO"
+{% endif %}
     logger -t lan-routing "iptables nat redirect mihomo -> {{ services.mihomo.redir_port }} for {{ routing.lan_cidr }}"
+{% if router_output_enabled %}
+    logger -t lan-routing "iptables nat redirect router OUTPUT ({{ router_output_fake_cidr }}) -> {{ services.mihomo.redir_port }}"
+{% endif %}
 {% elif routing.apply_iptables | default(false) and not mihomo_enabled %}
     _cleanup_mihomo_nat
     _cleanup_v2raya_nat
     logger -t lan-routing "apply_iptables=true, но services.mihomo.enabled=false — NAT-редирект на mihomo не применяю"
 {% else %}
+    _cleanup_mihomo_nat
+    _cleanup_v2raya_nat
     logger -t lan-routing "apply_iptables=false — NAT-redir mihomo не применялся (см. routing в router.yaml)"
 {% endif %}
 {% else %}
 {# proxy_client v2raya #}
-{% if routing.apply_iptables | default(false) and v2raya_enabled %}
+{% if routing.apply_iptables | default(false) and v2raya_enabled and v2raya_mode == 'redirect' %}
     _cleanup_mihomo_nat
     if ! netstat -tlnp 2>/dev/null | grep -q ":{{ v2raya_redir }}.*{{ services.v2raya.container_name | default('v2raya') }}"; then
       _cleanup_v2raya_nat
@@ -76,22 +112,45 @@ _start() {
     iptables -t nat -A "$CHAIN_V2RAYA" -p tcp -j REDIRECT --to-ports {{ v2raya_redir }}
     iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_V2RAYA" 2>/dev/null || \
       iptables -t nat -A PREROUTING -s {{ routing.lan_cidr }} -p tcp -j "$CHAIN_V2RAYA"
+{% if router_output_enabled %}
+    # Аналогично mihomo: проксируем TCP к fake-ip диапазону от самого роутера.
+    iptables -t nat -C OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_V2RAYA" 2>/dev/null || \
+      iptables -t nat -A OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_V2RAYA"
+{% endif %}
     logger -t lan-routing "iptables nat redirect v2raya -> {{ v2raya_redir }} for {{ routing.lan_cidr }}"
+{% if router_output_enabled %}
+    logger -t lan-routing "iptables nat redirect router OUTPUT ({{ router_output_fake_cidr }}) -> {{ v2raya_redir }}"
+{% endif %}
+{% elif v2raya_enabled and v2raya_mode == 'tun' %}
+    # Для TUN-пути LAN -> tun-интерфейс v2rayA нужна явная FORWARD-разрешалка.
+    # Иначе fw3 policy LAN->WAN может резать трафик в zone_lan_dest_REJECT.
+    iptables -C FORWARD -s {{ routing.lan_cidr }} -o {{ v2raya_tun_if }} -j ACCEPT 2>/dev/null || \
+      iptables -I FORWARD -s {{ routing.lan_cidr }} -o {{ v2raya_tun_if }} -j ACCEPT
+    _cleanup_mihomo_nat
+    _cleanup_v2raya_nat
+    logger -t lan-routing "v2raya transparent_mode=tun — FORWARD ACCEPT {{ routing.lan_cidr }} -> {{ v2raya_tun_if }}, REDIRECT отключён"
 {% elif routing.apply_iptables | default(false) and not v2raya_enabled %}
     _cleanup_v2raya_nat
     logger -t lan-routing "apply_iptables=true, но services.v2raya.enabled=false"
 {% else %}
+    _cleanup_mihomo_nat
+    _cleanup_v2raya_nat
     logger -t lan-routing "apply_iptables=false — NAT-redir v2raya не применялся (см. routing в router.yaml)"
 {% endif %}
 {% endif %}
 
+    # Защита от «залипшего» block_quic после переключения конфигурации:
+    # сначала снимаем DROP, затем ниже (по условию) добавляем обратно.
+    iptables -D FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || true
 {% if routing.block_quic | default(false) %}
-{% if (pc == 'mihomo' and mihomo_enabled) or (pc == 'v2raya' and v2raya_enabled) %}
+{% if tun_enabled %}
+    logger -t lan-routing "block_quic=true проигнорирован: TUN-режим перехватывает UDP/QUIC в прокси напрямую"
+{% elif (pc == 'mihomo' and mihomo_enabled) or (pc == 'v2raya' and v2raya_enabled) %}
     iptables -C FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || \
       iptables -I FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP
     logger -t lan-routing "iptables FORWARD DROP UDP/443 (QUIC) for {{ routing.lan_cidr }}"
 {% else %}
-    logger -t lan-routing "block_quic=true пропущен: выбранный proxy-клиент выключен (без прокси блок UDP/443 обычно вреден)"
+    logger -t lan-routing "block_quic=true пропущен: выбранный proxy-клиент выключен"
 {% endif %}
 {% endif %}
 }
@@ -99,7 +158,8 @@ _start() {
 _stop() {
     _cleanup_mihomo_nat
     _cleanup_v2raya_nat
-{% if routing.block_quic | default(false) %}
+    _cleanup_tun_forward_accept
+{% if routing.block_quic | default(false) and not tun_enabled %}
     iptables -D FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || true
 {% endif %}
 }

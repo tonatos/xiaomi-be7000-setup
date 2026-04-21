@@ -72,7 +72,8 @@ services:
     # Порт для web UI v2raya.
     port: 2017
     # TCP transparent redirect (dokodemo-door «transparent» в ядре v2rayA; см. v2rayTmpl.go, порт 52345).
-    # При routing.apply_iptables: true lan-routing.sh делает REDIRECT на этот порт (как redir-port у mihomo).
+    # Используется только при v2raya.transparent_mode: "redirect".
+    # При routing.apply_iptables: true lan-routing.sh делает REDIRECT на этот порт.
     redir_port: 52345
   torrserver:
     # Включить/выключить TorrServer.
@@ -187,16 +188,33 @@ public_endpoint:
   # Публичный IP/домен для генерации vless-ссылки (`vless-link`).
   host: ""
 
+v2raya:
+  # Режим прозрачного прокси для v2rayA:
+  # - tun: основной режим (перехват TCP+UDP/QUIC через TUN в ядре v2rayA)
+  # - redirect: legacy-режим (TCP REDIRECT через iptables/redir_port)
+  transparent_mode: "tun"
+  # Шаблон имени tun-интерфейса v2rayA для FORWARD ACCEPT в iptables.
+  # По умолчанию "tun+" (например tun0, tun1). Поменяйте, если в вашей сборке иное имя.
+  tun_interface: "tun+"
+
 routing:
-  # Применять ли iptables-правила прозрачного прокси для LAN.
+  # Применять ли iptables REDIRECT для TCP из LAN (redir-port).
+  # При TUN-режиме (mihomo.tun.enable: true ИЛИ v2raya.transparent_mode: tun)
+  # — необязательно: TUN перехватывает и TCP, и UDP.
+  # При apply_iptables: true TCP дополнительно перехватывается через NAT REDIRECT (гибридный режим).
   apply_iptables: false
-  # CIDR вашей домашней сети (используется при генерации iptables-правил).
+  # OUTPUT-redir для TCP трафика самого роутера к fake-ip диапазону.
+  # Нужен, если apply_iptables: true — чтобы curl/wget роутера работали при fake-ip DNS.
+  apply_router_output_iptables: true
+  # Диапазон fake-ip, редиректируемый в redir-port (только при apply_iptables: true).
+  router_output_fake_cidr: "198.18.0.0/16"
+  # CIDR вашей LAN (используется при генерации iptables-правил).
   lan_cidr: "192.168.31.0/24"
-  # Список IP, которые нужно исключить из transparent proxy.
+  # Список IP, исключённых из transparent proxy (например, Xbox/PS с чувствительным NAT).
   excluded_ips: []
-  # Блокировать QUIC (HTTP/3, UDP/443) из LAN через iptables FORWARD DROP.
-  # Браузеры автоматически деградируют на TCP/443 (HTTP/2), который идёт через прокси.
-  # Рекомендуется включить при apply_iptables: true, чтобы QUIC не обходил прокси напрямую.
+  # Блокировать QUIC (UDP/443) через iptables FORWARD DROP.
+  # УСТАРЕЛО при TUN-режиме: TUN перехватывает UDP/QUIC и заворачивает в прокси.
+  # Оставлено для режима без TUN (apply_iptables без tun.enable).
   block_quic: false
 
 # Ключи здесь соответствуют нативному формату mihomo.
@@ -208,10 +226,14 @@ mihomo:
   log-level: info
 
   tun:
-    # Включение TUN-режима mihomo.
-    enable: false
-    # Тип сетевого стека TUN.
-    stack: system
+    # TUN-режим mihomo: перехватывает TCP и UDP (QUIC/HTTP3) из LAN без iptables REDIRECT.
+    # Требует cap_add: [NET_ADMIN] и devices: [/dev/net/tun] в compose (выставлены автоматически).
+    # На роутере дополнительно применяется FORWARD ACCEPT для LAN -> Meta.
+    enable: true
+    # mixed: TCP через системный стек, UDP через gVisor. Рекомендован для маршрутизатора.
+    stack: mixed
+    # Автоматически определять исходящий интерфейс (eth0 / WAN).
+    auto-detect-interface: true
 
   sniffer:
     # Включение sniffer (L7-определение доменов).
@@ -225,6 +247,8 @@ mihomo:
       - tls
       # Включить sniffing для HTTP.
       - http
+      # QUIC (HTTP/3): sniffing нужен для определения домена из QUIC Initial пакетов через TUN.
+      - quic
     # Подменять destination на sniffed-домен.
     override-destination: true
 

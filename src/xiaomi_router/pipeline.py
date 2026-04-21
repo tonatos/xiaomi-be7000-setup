@@ -374,9 +374,11 @@ def deploy(
 
         apply_dnsmasq_upstream(ssh, cfg, log=log)
 
-        routing = cfg.get("routing", {})
-        if routing.get("apply_iptables", False) or routing.get("block_quic", False):
-            log("      Применяю lan-routing (iptables) (start)...")
+        # Запускаем lan-routing всегда для конвергенции runtime-состояния:
+        # скрипт сам решит, нужно ли применять REDIRECT, и подчистит устаревшие
+        # project-managed правила после переключения режимов (tun/redirect).
+        if str(cfg.get("proxy_client", "mihomo")).strip() in ("mihomo", "v2raya"):
+            log("      Применяю lan-routing (iptables convergence) (start)...")
             ssh.exec_streaming(
                 f"sh '{stack}/routing/lan-routing.sh' start 2>&1",
                 log=lambda line: log(f"      {line}"),

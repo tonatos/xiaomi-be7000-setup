@@ -7,6 +7,7 @@
   - [Требования](#требования)
   - [Как использовать конфигуратор](#как-использовать-конфигуратор)
   - [Быстрый старт](#быстрый-старт)
+    - [Mihomo (по умолчанию)](#mihomo-по-умолчанию)
     - [Переключение Mihomo на V2rayA](#переключение-mihomo-на-v2raya)
     - [SSH с нуля (xmir-patcher)](#ssh-с-нуля-xmir-patcher)
     - [Деплой стека](#деплой-стека)
@@ -19,13 +20,16 @@
     - [Фильтр-листы «из коробки» (актуально для текущей AGH)](#фильтр-листы-из-коробки-актуально-для-текущей-agh)
   - [Роутер как Xray-сервер для внешних устройств](#роутер-как-xray-сервер-для-внешних-устройств)
   - [Прозрачный прокси](#прозрачный-прокси)
+    - [Mihomo (TUN-режим, по умолчанию)](#mihomo-tun-режим-по-умолчанию)
+    - [v2rayA](#v2raya)
+    - [Откат при потере интернета](#откат-при-потере-интернета)
   - [Ограничения Xiaomi Docker](#ограничения-xiaomi-docker)
   - [Ресурсы](#ресурсы)
   - [Лицензия](#лицензия)
 
 ## Мотивация
 
-Роутер Xiaomi BE7000 крайне противоречивое с потребительской точки зрения устройство. С одной стороны, он обладает очень мощным железом: 4-ядерный процессор, 1Гб оперативной памяти, порты 2.5 Гбит/с., мощные антены, отличное покрытие, поддержка функций Wi-Fi 7. И какточка доступа он работает прекрасно. С другой стороны, для более глубокой настройки и использования всего потенциала железа у нас возникает огромное количество проблем:
+Роутер Xiaomi BE7000 крайне противоречивое с потребительской точки зрения устройство. С одной стороны, он обладает очень мощным железом: 4-ядерный процессор, 1Гб оперативной памяти, порты 2.5 Гбит/с., мощные антены, отличное покрытие, поддержка функций Wi-Fi 7. И как точка доступа он работает прекрасно. С другой стороны, для более глубокой настройки и использования всего потенциала железа у нас возникает огромное количество проблем:
 - закрытая китайская прошивка в виде, судя по всему, глубоко переработанного форка OpenWRT
 - свежий процессор Qualcomm IPQ95xx становится и минусом - OpenWRT его не поддерживает
 - крайне маленькое сообщество, отсутствие пакетов и гайдов
@@ -40,8 +44,8 @@
 
 DevOps-ориентированный конфигуратор для Xiaomi BE7000 (стоковая прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **AdGuard Home**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
 
-- устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
-  - в качестве опции, вместо Mihomo вы можете использовать клиент [v2rayA](https://github.com/v2rayA/v2rayA), если вам привычно настройка клиента и правил через Web GUI
+- устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha) в **TUN-режиме** (перехватывает TCP и UDP/QUIC из LAN), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
+  - в качестве опции, вместо Mihomo вы можете использовать клиент [v2rayA](https://github.com/v2rayA/v2rayA), если вам привычна настройка клиента и правил через Web GUI
 - [Mihomo Dashboard](https://github.com/MetaCubeX/metacubexd) — интерфейс для мониторинга вашего Mihomo-клиента
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) — DNS-фильтрация (реклама/трекинг/вредоносные домены) с автоматической интеграцией в `dnsmasq`
    Xray-сервер для того, чтобы вы могли подключаться к своему роутеру из внешней сети (например, со своего смартфона), используя роутер, как шлюз для Shadowsocks-прокси с маршрутизацией трафика
@@ -126,6 +130,8 @@ cp config/router.example.yaml config/router.yaml
 
 `config/router.base.yaml` подгружается автоматически, а `config/router.yaml` переопределяет любые его поля.
 
+### Mihomo (по умолчанию)
+
 Если вы используете Mihomo, то укажите данные вашего proxy-сервера в секции `mihomo.proxies` файла `config/router.yaml`. Вот пример для Shadowsocks прокси:
 ```
 proxies:
@@ -165,7 +171,21 @@ services:
 mihomo: []
 ```
 
-Прозрачный прокси для LAN задаётся так же, как для mihomo: `routing.apply_iptables: true` и скрипт `stack/routing/lan-routing.sh` (TCP `REDIRECT` на `services.v2raya.redir_port`, по умолчанию **52345** — как у inbound `transparent` в [v2rayA](https://github.com/v2rayA/v2rayA/blob/main/service/core/v2ray/v2rayTmpl.go)). В веб-интерфейсе v2rayA включите **прозрачный прокси** в режиме **Redirect**, чтобы ядро слушало этот порт; правила `iptables` для редиректа с хоста роутера проект не поручает контейнеру, а применяет при старте (в т.ч. после перезагрузки) скрипт автозапуска. Если `apply_iptables: true`, автозапуск дождётся открытия redir-порта перед применением `lan-routing.sh`.
+Для v2rayA рекомендуется **TUN-режим**:
+
+- в `config/router.yaml`: `v2raya.transparent_mode: "tun"` (по умолчанию так и есть в базе);
+- `routing.apply_iptables` можно оставить `false` (iptables REDIRECT не нужен).
+
+Режим `redirect` оставлен как legacy-вариант: используйте `v2raya.transparent_mode: "redirect"` и `routing.apply_iptables: true`, тогда `lan-routing.sh` применит TCP REDIRECT на `services.v2raya.redir_port` (по умолчанию 52345).
+
+Рабочие настройки в Web GUI v2rayA, которые нужно задать в интерфейсе:
+```
+- Прозрачный прокси: Режим разделения трафика такой же, как и у порта с правилами
+- Реализация прозрачного прокси/Системного прокси: system tun
+- Предотвратить DNS-спуфинг: DoH
+- Специальный режим: Выключено (fakedns не работает)
+- Сниффер: Http + TLS + Quic
+```
 
 ### SSH с нуля (xmir-patcher)
 
@@ -383,19 +403,48 @@ poetry run xiaomi-router vless-server-setup
 
 ## Прозрачный прокси
 
-По умолчанию, весь трафик вашей **не будет** маршрутизироваться в прокси-клиент `Mihomo`/`v2RayA` по умолчанию.
+### Mihomo (TUN-режим, по умолчанию)
 
-В `router.yaml` секция `routing.apply_iptables` по умолчанию `false`. Чтобы маршрутизировать **TCP** из LAN через выбранный клиент, включите `routing.apply_iptables: true`: на роутере применяется `stack/routing/lan-routing.sh` — для **mihomo** редирект на `services.mihomo.redir_port` (по умолчанию 7891), для **v2rayA** — на `services.v2raya.redir_port` (по умолчанию 52345). 
+Mihomo запускается в **TUN-режиме** (`mihomo.tun.enable: true`) и перехватывает весь трафик из LAN через виртуальный интерфейс `Meta`:
 
-Для v2rayA дополнительно в UI включите прозрачный прокси **Redirect**, иначе ядро не поднимет inbound на redir-порту.
+- **TCP и UDP/QUIC (HTTP/3)** — заворачиваются в прокси автоматически, без дополнительных iptables-правил.
+- Контейнер mihomo получает необходимые привилегии автоматически (`cap_add: NET_ADMIN`, `devices: /dev/net/tun`).
+- При deploy скрипт добавляет `iptables FORWARD ACCEPT` для `LAN -> Meta` (иначе fw3 policy может резать TUN-трафик как не-WAN).
 
-Включайте только понимая последствия для вашей LAN (`routing.lan_cidr`). Если по каким-то причинам, сетевые правила сломали вам интернет, откатите их командой (через ssh на роутере):
+Для активации прозрачного проксирования достаточно настроить upstream в `mihomo.proxies` — дополнительных флагов в `routing` не требуется.
+
+**Гибридный режим** (`routing.apply_iptables: true`): поверх TUN добавляется NAT REDIRECT для TCP через `redir-port`. Используется, если TUN по каким-то причинам не перехватывает нужный трафик.
+
+### v2rayA
+
+Рекомендуемый режим для v2rayA — **TUN**:
+
+- `v2raya.transparent_mode: "tun"` в `router.yaml`;
+- `v2raya.tun_interface` оставьте `"tun+"` (или укажите ваш шаблон интерфейса, если имя отличается);
+- в GUI v2rayA включите **Transparent Proxy** и выберите режим **TUN**;
+- в GUI v2rayA отключите **FakeDNS / Prevent DNS pollution** (иначе возможны fake-ip `198.18.x.x` в `direct`);
+- `routing.apply_iptables` оставьте `false` (legacy REDIRECT не нужен).
+
+v2rayA запускается с `privileged: true` и имеет доступ к `/dev/net/tun`, поэтому TUN-режим работает в контейнере.
+
+Если нужен старый режим **Redirect** (только TCP): задайте `v2raya.transparent_mode: "redirect"` и включите `routing.apply_iptables: true`.
+
+### Откат при потере интернета
+
+Если сетевые правила сломали интернет — выполните на роутере через SSH:
+
 ```sh
 /mnt/usb-XXXXXXXX/stack/routing/rollback.sh
 ```
 
-Где:
-- `usb-XXXXXXXX` - директория с вашей USB-флешкой
+Или перезагрузите роутер кнопкой — iptables-правила сбросятся до состояния прошивки.
+
+Ручной откат iptables (если TCP-редирект включён):
+```sh
+iptables -t nat -F MIHOMO_MIHOMO 2>/dev/null
+iptables -t nat -X MIHOMO_MIHOMO 2>/dev/null
+iptables -t nat -D PREROUTING -s 192.168.31.0/24 -p tcp -j MIHOMO_MIHOMO 2>/dev/null
+```
 
 ## Ограничения Xiaomi Docker
 
