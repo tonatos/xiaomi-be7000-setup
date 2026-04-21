@@ -44,6 +44,11 @@ tasks:
     cmds:
       - "{{.PY}} -m xiaomi_router sync-push"
 
+  add-mihomo-proxy:
+    desc: "Добавить/обновить прокси в mihomo.proxies. Пример: task add-mihomo-proxy -- 'ss://...'"
+    cmds:
+      - "{{.PY}} -m xiaomi_router add-mihomo-proxy {{.CLI_ARGS}}"
+
   vless-link:
     desc: Напечатать VLESS (Reality) ссылку для клиента
     cmds:

@@ -27,6 +27,7 @@ from xiaomi_router.setup_extra import (
 )
 from xiaomi_router.smoke import run_smoke
 from xiaomi_router.ssh_util import RouterSSH
+from xiaomi_router.proxy_url_parser import parse_proxy_url, upsert_proxy_in_yaml
 from xiaomi_router.vless_link import build_vless_reality_link
 from xiaomi_router.xmir_bootstrap import run_bootstrap_if_needed
 
@@ -370,6 +371,82 @@ def cmd_vless_server_setup(
     typer.echo("\n" + "=" * 55)
     typer.echo(f"Public Key (сохраните для настройки клиентов): {pub_b64}")
     typer.echo("=" * 55)
+
+
+@app.command("add-mihomo-proxy")
+def cmd_add_mihomo_proxy(
+    proxy_url: str = typer.Argument(
+        ...,
+        help="Ссылка прокси: ss://, vless:// или trojan://",
+        metavar="PROXY_URL",
+    ),
+    name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Переопределить имя прокси (по умолчанию берётся из ссылки)",
+    ),
+    print_only: bool = typer.Option(
+        False,
+        "--print",
+        help="Вывести YAML-фрагмент для ручного добавления, не изменяя router.yaml",
+    ),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Добавить или обновить прокси в mihomo.proxies в config/router.yaml.
+
+    Принимает ссылки в форматах ss://, vless://, trojan://.
+
+    Если прокси с тем же именем уже есть — обновляет его.
+    С флагом --print выводит YAML-фрагмент без изменения файла.
+    """
+    try:
+        proxy = parse_proxy_url(proxy_url)
+    except ValueError as exc:
+        typer.echo(typer.style(str(exc), fg=typer.colors.RED), err=True)
+        raise typer.Exit(1) from exc
+
+    if name:
+        proxy["name"] = name
+
+    if print_only:
+        import yaml
+
+        snippet = yaml.dump(
+            [proxy], allow_unicode=True, default_flow_style=False, sort_keys=False
+        )
+        typer.echo("# Добавьте в секцию mihomo.proxies вашего config/router.yaml:\n")
+        typer.echo(snippet)
+        return
+
+    main_p = config or default_config_path()
+    if not main_p.exists():
+        ex = main_p.parent / "router.example.yaml"
+        typer.echo(
+            typer.style(
+                f"Нет {main_p}. Скопируйте {ex} в {main_p} и заполните.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    try:
+        was_updated = upsert_proxy_in_yaml(main_p, proxy)
+    except Exception as exc:
+        typer.echo(
+            typer.style(f"Ошибка обновления {main_p}: {exc}", fg=typer.colors.RED),
+            err=True,
+        )
+        raise typer.Exit(1) from exc
+
+    action = "обновлён" if was_updated else "добавлен"
+    typer.echo(
+        typer.style(
+            f"✓ Прокси '{proxy['name']}' {action} в {main_p}",
+            fg=typer.colors.GREEN,
+        )
+    )
 
 
 def main() -> None:

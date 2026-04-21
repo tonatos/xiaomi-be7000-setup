@@ -1,11 +1,11 @@
 # Changelog
 
-## [0.3.1] — 2026-04-21
+## [0.4.0] — 2026-04-21
 
-- Для `v2rayA` в `transparent_mode=tun` добавлен `iptables FORWARD ACCEPT` из LAN в tun-интерфейс (`v2raya.tun_interface`, по умолчанию `tun+`)
-- Добавлен `v2raya.tun_interface` в `router.base.yaml` и `router.example.yaml`
-- В `smoke` добавлен WARN про включённый FakeDNS в `v2rayA` (`198.18.x.x` в `direct` при TUN)
-- README дополнен рекомендациями для `v2rayA` TUN и параметром `v2raya.tun_interface`
+- Добавлена команда `add-mihomo-proxy`: парсит ссылки `ss://`, `vless://`, `trojan://` и добавляет/обновляет прокси в `mihomo.proxies` файла `config/router.yaml` с сохранением комментариев (ruamel.yaml round-trip)
+- Флаг `--print` выводит YAML-фрагмент для ручной вставки без изменения файла
+- Флаг `--name` позволяет переопределить имя прокси из URL
+- Добавлена зависимость `ruamel.yaml`
 
 ## [0.3.0] — 2026-04-21
 

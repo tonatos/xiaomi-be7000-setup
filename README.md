@@ -13,6 +13,7 @@
     - [Деплой стека](#деплой-стека)
     - [Окружение на USB (однократно)](#окружение-на-usb-однократно)
     - [Переменные окружения](#переменные-окружения)
+    - [Управление прокси Mihomo](#управление-прокси-mihomo)
     - [Команды](#команды)
   - [Структура репозитория](#структура-репозитория)
   - [Подлключение собственных docker-контейнеров](#подлключение-собственных-docker-контейнеров)
@@ -264,6 +265,41 @@ task setup-compose      # плагин docker compose на USB
 - `ROUTER_SSH_USER`
 - `ROUTER_PUBLIC_HOST`
 
+### Управление прокси Mihomo
+
+Команда `add-mihomo-proxy` разбирает ссылку вида `ss://`, `vless://` или `trojan://` и добавляет (или обновляет) прокси в секции `mihomo.proxies` вашего `config/router.yaml`.
+
+**Добавить прокси напрямую в `router.yaml`:**
+
+```bash
+task add-mihomo-proxy -- 'ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNzd29yZA==@1.2.3.4:8388#MyProxy'
+# или
+poetry run xiaomi-router add-mihomo-proxy 'vless://uuid@host:443?security=reality&pbk=...&sid=...&sni=www.example.com&fp=chrome&flow=xtls-rprx-vision#MyVless'
+```
+
+Если прокси с таким именем уже есть в файле — он будет обновлён. Команда использует round-trip редактирование YAML и **сохраняет все существующие комментарии** в файле.
+
+**Задать своё имя:**
+
+```bash
+task add-mihomo-proxy -- 'trojan://secret@host:443?sni=example.com#OldName' --name "MyTrojan"
+```
+
+**Получить YAML-фрагмент без изменения файла** (флаг `--print`):
+
+```bash
+task add-mihomo-proxy -- 'ss://...' --print
+# выводит фрагмент YAML для ручной вставки в router.yaml
+```
+
+Поддерживаемые транспорты и параметры парсинга:
+
+| Протокол | Транспорт | Параметры из URL |
+|----------|-----------|-----------------|
+| `ss://` | — | cipher, password, server, port |
+| `vless://` | tcp, ws, grpc, xhttp, h2 | security (tls/reality), sni, fp, pbk, sid, flow, alpn, path, host, mode |
+| `trojan://` | tcp, ws, grpc | sni, fp, alpn, allowInsecure, path, host |
+
 ### Команды
 
 | Команда | Назначение |
@@ -284,6 +320,8 @@ task setup-compose      # плагин docker compose на USB
 | `task sync-pull` | Скачать конфиги со стека в `build/synced-from-router` |
 | `task sync-push` | Залить `build/rendered` и выполнить `docker compose up -d` |
 | `task rollback -- path/to/deploy-....json` | Откат по метаданным deploy (JSON с роутера) |
+| **Прокси Mihomo** |
+| `task add-mihomo-proxy -- 'URL'` | Добавить/обновить прокси в `mihomo.proxies` из ссылки `ss://`, `vless://`, `trojan://` |
 | **Vless-сервер** |
 | `task vless-link` | Напечатать VLESS (Reality) ссылку для клиента |
 | `task vless-server-setup` | Сгенерировать ключи и клиентов для Xray REALITY на онове вашего текущего `router.yaml` |
