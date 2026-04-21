@@ -1,5 +1,7 @@
 # xiaomi-be7000-setup
 
+![Xiaomi BE7000 Setup](assets/Xiaomi_BE7000_Setup_2026-04-21T17_22_49_121835.svg)
+
 - [xiaomi-be7000-setup](#xiaomi-be7000-setup)
   - [Мотивация](#мотивация)
   - [Описание](#описание)
@@ -102,6 +104,7 @@ flowchart TD
 ## Как использовать конфигуратор
 
 Вы можете использовать как отдельные функции конфигуратора для дальнейшей самостоятельной настройки пакетов, такие:
+- `task init`: интерактивный мастер (Textual TUI) — экран с формами, генерация/обновление `router.yaml`, опциональный bootstrap SSH и deploy
 - `task bootstrap-ssh`: получение ssh-доступа
 - `task setup-entware`: установить Entware-инфраструктура (`/opt` через bind mount)
 - `task setup-shell-env`: настройка shell-окружения (после активации, команды `docker`, `opkg` и т.п. будут доступны в PATH)
@@ -119,7 +122,16 @@ cd xiaomi-be7000-setup
 poetry install
 ```
 
-Скопируйте конфиги:
+Для быстрого запуска мастера настройки в интерактивном режиме:
+
+```bash
+task init
+```
+
+Мастер задаст ключевые вопросы по proxy-клиенту, сервисам и deploy, аккуратно обновит только известные поля в `router.yaml` (без затирания ваших ручных секций) и может сразу выполнить полный деплой.  
+Если вы заполняете upstream URL для Mihomo (`ss://`, `vless://`, `trojan://`), мастер сразу добавит/обновит `mihomo.proxies`.
+
+Вы так же можете не пользоваться мастером и выполнить конфигурацию вручную. Для этого, скопируйте конфиги:
 
 ```bash
 cp config/router.example.yaml config/router.yaml
@@ -130,6 +142,7 @@ cp config/router.example.yaml config/router.yaml
 Если у вашего роутера еще не настроен ssh, то воспользуйтесь инструкцией из [следующей секции](#ssh-с-нуля-xmir-patcher).
 
 `config/router.base.yaml` подгружается автоматически, а `config/router.yaml` переопределяет любые его поля.
+
 
 ### Mihomo (по умолчанию)
 
@@ -306,6 +319,7 @@ task add-mihomo-proxy -- 'ss://...' --print
 | --- | --- |
 | **Системные команды** |
 | `task install` | Установить Python-зависимости (`poetry install`) |
+| `task init` | Интерактивный мастер: заполнение `router.yaml`, опциональный bootstrap SSH и deploy |
 | **Управление роутером** |
 | `task bootstrap-ssh` | Поднять SSH через `xmir-patcher`, если порт 22 недоступен |
 | `task diagnose` | Сводка по состоянию `mi_docker` / USB |
@@ -329,7 +343,7 @@ task add-mihomo-proxy -- 'ss://...' --print
 CLI-эквиваленты (без `task`):
 
 ```bash
-poetry run xiaomi-router {bootstrap-ssh, render, ...}
+poetry run xiaomi-router {init, bootstrap-ssh, render, ...}
 ```
 
 

@@ -14,6 +14,12 @@ tasks:
     cmds:
       - poetry install
 
+  init:
+    desc: Интерактивный мастер первичной настройки и deploy
+    cmds:
+      - poetry install
+      - "{{.PY}} -m xiaomi_router init"
+
   render:
     desc: Локальный рендер шаблонов в build/rendered
     cmds:

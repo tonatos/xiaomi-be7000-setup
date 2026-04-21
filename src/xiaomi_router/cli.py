@@ -11,6 +11,7 @@ from xiaomi_router.config_loader import (
     validate_main_router_yaml_file,
     validate_merged_config_for_deploy,
 )
+from xiaomi_router.init_wizard import run_init_wizard
 from xiaomi_router.diagnose import run_diagnose
 from xiaomi_router.paths import default_config_path, default_secrets_path
 from xiaomi_router.pipeline import (
@@ -314,6 +315,24 @@ def cmd_setup_compose(
 ) -> None:
     cfg = _load(config, secrets)
     setup_compose(cfg)
+
+
+@app.command("init")
+def cmd_init(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    secrets: Optional[Path] = typer.Option(None, "--secrets", "-s"),
+) -> None:
+    """Интерактивный мастер первичной настройки и опционального deploy."""
+    try:
+        run_init_wizard(config=config, secrets=secrets)
+    except KeyboardInterrupt:
+        typer.echo("\nМастер прерван пользователем.")
+        raise typer.Exit(1) from None
+    except SystemExit as exc:
+        msg = str(exc).strip()
+        if msg and msg != "0":
+            typer.echo(typer.style(msg, fg=typer.colors.RED), err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command("vless-server-setup")
