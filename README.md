@@ -230,6 +230,16 @@ poetry run xiaomi-router deploy
 - `--skip-smoke` — не запускать smoke-проверки после `docker compose up`.
 - `--no-rollback-on-smoke-fail` — если smoke не прошёл, завершить deploy ошибкой, но не выполнять `docker compose down` и rollback.
 
+> **Синтаксис `go-task`**: флаги передаются после разделителя `--`, иначе `task` воспримет их как свои:
+> ```bash
+> task deploy -- --skip-smoke
+> task deploy -- --no-rollback-on-smoke-fail
+> ```
+> Напрямую без `task`:
+> ```bash
+> poetry run xiaomi-router deploy --skip-smoke
+> ```
+
 Перед изменениями на USB создаётся архив в `$USB/backups/`, а также `uci export firewall` и `uci export dhcp`; по умолчанию при ошибке smoke выполняются `docker compose down`, затем откат файлов и импорт сохранённых `firewall`/`dhcp`.
 
 Доступные эндпоинты, после развертывания полного стека:

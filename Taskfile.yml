@@ -18,37 +18,37 @@ tasks:
     desc: Интерактивный мастер первичной настройки и deploy
     cmds:
       - poetry install
-      - "{{.PY}} -m xiaomi_router init"
+      - "{{.PY}} -m xiaomi_router init {{.CLI_ARGS}}"
 
   render:
     desc: Локальный рендер шаблонов в build/rendered
     cmds:
-      - "{{.PY}} -m xiaomi_router render"
+      - "{{.PY}} -m xiaomi_router render {{.CLI_ARGS}}"
 
   render-live:
     desc: Рендер с определением USB по SSH
     cmds:
-      - "{{.PY}} -m xiaomi_router render --discover-usb"
+      - "{{.PY}} -m xiaomi_router render --discover-usb {{.CLI_ARGS}}"
 
   deploy:
     desc: Полный деплой на роутер (бэкап, upload, compose, smoke)
     cmds:
-      - "{{.PY}} -m xiaomi_router deploy"
+      - "{{.PY}} -m xiaomi_router deploy {{.CLI_ARGS}}"
 
   smoke:
     desc: Проверки работоспособности по SSH
     cmds:
-      - "{{.PY}} -m xiaomi_router smoke"
+      - "{{.PY}} -m xiaomi_router smoke {{.CLI_ARGS}}"
 
   sync-pull:
     desc: Скачать конфиги со стека на роутере
     cmds:
-      - "{{.PY}} -m xiaomi_router sync-pull"
+      - "{{.PY}} -m xiaomi_router sync-pull {{.CLI_ARGS}}"
 
   sync-push:
     desc: Залить build/rendered и запустить docker compose up
     cmds:
-      - "{{.PY}} -m xiaomi_router sync-push"
+      - "{{.PY}} -m xiaomi_router sync-push {{.CLI_ARGS}}"
 
   add-mihomo-proxy:
     desc: "Добавить/обновить прокси в mihomo.proxies. Пример: task add-mihomo-proxy -- 'ss://...'"
@@ -58,18 +58,18 @@ tasks:
   vless-link:
     desc: Напечатать VLESS (Reality) ссылку для клиента
     cmds:
-      - "{{.PY}} -m xiaomi_router vless-link"
+      - "{{.PY}} -m xiaomi_router vless-link {{.CLI_ARGS}}"
 
   vless-server-setup:
     desc: Сгенерировать ключи и клиентов для Xray REALITY
     cmds:
-      - "{{.PY}} -m xiaomi_router vless-server-setup"
+      - "{{.PY}} -m xiaomi_router vless-server-setup {{.CLI_ARGS}}"
 
   bootstrap-ssh:
     desc: xmir-patcher connect + install_ssh, если SSH недоступен
     cmds:
       - task: xmir-deps
-      - "{{.PY}} -m xiaomi_router bootstrap-ssh"
+      - "{{.PY}} -m xiaomi_router bootstrap-ssh {{.CLI_ARGS}}"
 
   xmir-deps:
     internal: true
@@ -82,19 +82,19 @@ tasks:
   diagnose:
     desc: Диагностика Docker / USB на роутере
     cmds:
-      - "{{.PY}} -m xiaomi_router diagnose"
+      - "{{.PY}} -m xiaomi_router diagnose {{.CLI_ARGS}}"
 
   setup-shell-env:
     desc: Настроить shell env на USB и автоподхват в SSH
     cmds:
-      - "{{.PY}} -m xiaomi_router setup-shell-env"
+      - "{{.PY}} -m xiaomi_router setup-shell-env {{.CLI_ARGS}}"
 
   setup-entware:
     desc: Установить Entware и сохранить wrapper штатного opkg
     cmds:
-      - "{{.PY}} -m xiaomi_router setup-entware"
+      - "{{.PY}} -m xiaomi_router setup-entware {{.CLI_ARGS}}"
 
   setup-compose:
     desc: Установить docker compose plugin на USB
     cmds:
-      - "{{.PY}} -m xiaomi_router setup-compose"
+      - "{{.PY}} -m xiaomi_router setup-compose {{.CLI_ARGS}}"
