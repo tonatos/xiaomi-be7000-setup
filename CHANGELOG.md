@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.1] — 2026-04-22
+
+- В `autorun/010-start-docker.sh` добавлен auto-swap bootstrap: перед запуском Docker проверяется `SwapTotal`, при необходимости выполняется `swapon` существующего `/mnt/usb*/.swapfile`, а если файла нет — создаётся и инициализируется swapfile 256MB на USB (на случай, если этого не сделали через интерфейс, иначе память не хватает на запуск стека)
+- В `deploy` добавлено авто-правило UCI `firewall.xray_vless_wan_allow` (WAN ACCEPT для tcp-порта `xray.inbound.port`, по умолчанию 443/8443), чтобы VLESS inbound был доступен извне при `services.xray_server.enabled: true` (после сброса прошивки и накатывания конфигурации с этим возникли проблемы)
+- В `smoke` проверка WAN-правила для Xray переведена на общий `iptables -S` (а не только `zone_wan_input`), чтобы избежать ложных WARN, когда ACCEPT-правило находится в `input_wan_rule`
+
 ## [0.6] — 2026-04-22
 
 - Для TorrServer дефолтный образ переключён на `ghcr.io/yourok/torrserver:latest` и обновлены env-переменные в compose (`TS_CONF_PATH`/`TS_LOG_PATH`/`TS_TORR_DIR`), чтобы бинарь использовался из образа и не скачивался на каждый старт

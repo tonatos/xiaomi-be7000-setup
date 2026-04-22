@@ -184,6 +184,16 @@ def run_smoke(
             _append_container_diagnostics(
                 ssh, label, cname, msgs, diagnosed_containers
             )
+        else:
+            _, fw_out, _ = ssh.exec(
+                "iptables -S 2>/dev/null | "
+                f"grep -Eq -- '-p tcp .*--dport {port} .* -j ACCEPT' && echo OK || echo MISS"
+            )
+            if "OK" not in fw_out:
+                msgs.append(
+                    f"[{label}] WARN: WAN firewall, вероятно, не пропускает tcp/{port} "
+                    "(iptables runtime). Для внешнего доступа добавьте ACCEPT rule."
+                )
         ok_all = ok_all and ok
 
     mh = services.get("mihomo", {})

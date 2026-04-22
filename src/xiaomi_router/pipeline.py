@@ -37,6 +37,18 @@ def _startup_paths(cfg: dict[str, Any]) -> tuple[str, str]:
     return base, f"{base.rstrip('/')}/{sub}"
 
 
+def _xray_inbound_port(cfg: dict[str, Any]) -> int:
+    xray = cfg.get("xray") if isinstance(cfg.get("xray"), dict) else {}
+    inbound = xray.get("inbound") if isinstance(xray.get("inbound"), dict) else {}
+    try:
+        port = int(inbound.get("port", 443))
+    except (TypeError, ValueError):
+        port = 443
+    if port < 1 or port > 65535:
+        return 443
+    return port
+
+
 def _compose_up_then_restart(
     ssh: RouterSSH,
     env: str,
@@ -111,6 +123,13 @@ def ensure_opa_docker_authz_disabled(ssh: RouterSSH) -> bool:
 
 def apply_uci_firewall_and_docker_fix(ssh: RouterSSH, cfg: dict[str, Any]) -> None:
     startup_base, _ = _startup_paths(cfg)
+    services = cfg.get("services") if isinstance(cfg.get("services"), dict) else {}
+    xray_svc = (
+        services.get("xray_server")
+        if isinstance(services.get("xray_server"), dict)
+        else {}
+    )
+    xray_enabled = bool(xray_svc.get("enabled", True))
     cmds = [
         "uci -q delete firewall.docker_autorun 2>/dev/null || true",
         "uci set firewall.docker_autorun=include",
@@ -118,9 +137,26 @@ def apply_uci_firewall_and_docker_fix(ssh: RouterSSH, cfg: dict[str, Any]) -> No
         f"uci set firewall.docker_autorun.path='{startup_base}/startup.sh'",
         "uci set firewall.docker_autorun.enabled='1'",
         "uci set firewall.docker_autorun.reload='1'",
-        "uci commit firewall",
+        "uci -q delete firewall.xray_vless_wan_allow 2>/dev/null || true",
     ]
+    if xray_enabled:
+        xray_port = _xray_inbound_port(cfg)
+        cmds.extend(
+            [
+                "uci set firewall.xray_vless_wan_allow=rule",
+                "uci set firewall.xray_vless_wan_allow.name='Allow-Xray-VLESS-WAN'",
+                "uci set firewall.xray_vless_wan_allow.src='wan'",
+                "uci set firewall.xray_vless_wan_allow.proto='tcp'",
+                f"uci set firewall.xray_vless_wan_allow.dest_port='{xray_port}'",
+                "uci set firewall.xray_vless_wan_allow.target='ACCEPT'",
+                "uci set firewall.xray_vless_wan_allow.enabled='1'",
+            ]
+        )
+    cmds.append("uci commit firewall")
     ssh.exec_text("; ".join(cmds))
+    # Важно: commit меняет конфиг UCI, но не всегда применяет правила в runtime.
+    # Для VLESS/WAN это критично — без reload/restart правило может отсутствовать в iptables.
+    ssh.exec_text("/etc/init.d/firewall reload 2>/dev/null || /etc/init.d/firewall restart 2>/dev/null || true")
 
     opa_restarted = ensure_opa_docker_authz_disabled(ssh)
     if not opa_restarted:
