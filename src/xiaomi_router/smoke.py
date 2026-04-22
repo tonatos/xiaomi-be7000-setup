@@ -254,7 +254,7 @@ def run_smoke(
                 f"[{label}] transparent_mode=tun: проверку redir-порта пропускаю (режим Redirect не используется)"
             )
             _, fake_out, _ = ssh.exec(
-                "if grep -q '\"fakedns\"' /mnt/usb*/stack/configs/v2raya/config.json 2>/dev/null; "
+                "if grep -q '\"fakedns\"' /mnt/usb*/stack/configs/v2raya/config.json /mnt/usb*/v2raya-runtime/config.json 2>/dev/null; "
                 "then echo FAKEDNS_ON; else echo FAKEDNS_OFF; fi"
             )
             if "FAKEDNS_ON" in fake_out:

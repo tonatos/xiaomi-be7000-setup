@@ -35,6 +35,9 @@ services:
   torrserver:
     # Включить TorrServer.
     enabled: false
+    # Опциональные лимиты контейнера (снижают риск подвисаний роутера под p2p-нагрузкой).
+    # mem_limit: "128m"
+    # pids_limit: 256
   adguardhome:
     # Включить контейнер AdGuard Home в compose.
     enabled: false

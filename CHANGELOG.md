@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6] — 2026-04-22
+
+- Для TorrServer дефолтный образ переключён на `ghcr.io/yourok/torrserver:latest` и обновлены env-переменные в compose (`TS_CONF_PATH`/`TS_LOG_PATH`/`TS_TORR_DIR`), чтобы бинарь использовался из образа и не скачивался на каждый старт
+- Autorun маршрутизации: один файл `020-proxy-routing.sh` под выбранный `proxy_client` (mihomo или v2raya); отдельные `020-mihomo-routing.sh` / `021-v2raya-routing.sh` не генерируются; при `deploy` старые имена удаляются с роутера
+- TorrServer runtime вынесен из `stack/configs`: по умолчанию в compose используются `runtime_volume` (`../torrserver-runtime:/opt/torrserver`) и отдельный read-only mount для `settings.json`; это убирает ядро/логи/кэш/torrents из stack-бэкапа
+- AdGuard Home runtime вынесен из `stack/configs`: `services.adguardhome.work_dir` по умолчанию теперь `../adguardhome-runtime/work`, чтобы `work/data` не раздувал stack и бэкапы
+- Runtime `mihomo` и `v2raya` вынесены из `stack/configs` (`../mihomo-runtime`, `../v2raya-runtime`); для `mihomo` конфиг монтируется отдельным read-only файлом `./configs/mihomo-config/config.yaml`
+- На boot добавлен `005-ensure-shell-env.sh`: восстанавливает hook `usb-env` в `/etc/profile`, если прошивка перезаписала файл после ребута
+- В backup stack-архива исключены runtime-хвосты в `configs/torrserver` (`TorrServer-*`, `torrents`, `cache`, `log`, `*.log`), legacy `configs/adguardhome/work`, а также legacy `configs/mihomo` и `configs/v2raya`, чтобы не раздувать backup и не ловить таймауты deploy
+
+## [0.5.2] — 2026-04-21
+- В compose-шаблоне для TorrServer добавлены поддержка лимитов контейнера (`mem_limit`, `pids_limit`, `ulimits`) и параметров путей/логов
+- Добавлен рендер `configs/torrserver/config/settings.json` из YAML-конфига (`torrserver.settings`)
+
 
 ## [0.5.1] — 2026-04-21
 - Поддерживается ветвление в случае, если пароль от SSH не задан

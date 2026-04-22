@@ -58,6 +58,10 @@ services:
     container_name: "mihomo"
     # Образ контейнера mihomo.
     image: "docker.io/metacubex/mihomo:latest"
+    # Runtime-данные mihomo (GeoIP/GeoSite/кэш) вне stack.
+    runtime_volume: "../mihomo-runtime:/root/.config/mihomo"
+    # Конфиг mihomo остаётся в stack и монтируется read-only.
+    settings_volume: "./configs/mihomo-config/config.yaml:/root/.config/mihomo/config.yaml:ro"
     # mixed-port в итоговом mihomo-config (локальный mixed proxy порт).
     mixed_port: 7890
     # redir-port в итоговом mihomo-config (transparent proxy порт).
@@ -69,6 +73,9 @@ services:
     container_name: "v2raya"
     # Образ контейнера v2raya.
     image: "mzz2017/v2raya:latest"
+    # Runtime-данные v2rayA (state/db/cache) вне stack.
+    runtime_volume: "../v2raya-runtime:/etc/v2raya"
+    # Legacy-совместимость: если задан services.v2raya.volume, он имеет приоритет.
     # Порт для web UI v2raya.
     port: 2017
     # TCP transparent redirect (dokodemo-door «transparent» в ядре v2rayA; см. v2rayTmpl.go, порт 52345).
@@ -81,9 +88,29 @@ services:
     # container_name для TorrServer.
     container_name: "torrserver"
     # Образ TorrServer.
-    image: "docker.io/yourok/torrserver:latest"
+    image: "ghcr.io/yourok/torrserver:latest"
     # Порт TorrServer на роутере (host network).
     port: 8090
+    # Ограничение памяти контейнера (Compose mem_limit).
+    mem_limit: "128m"
+    # Ограничение числа процессов в контейнере.
+    pids_limit: 256
+    # ulimit для TorrServer.
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    # Runtime-данные TorrServer (ядро, кэш, логи, torrents) держим вне stack/,
+    # чтобы не раздувать stack-бэкапы.
+    runtime_volume: "../torrserver-runtime:/opt/torrserver"
+    # Только settings.json остаётся в stack/configs и монтируется read-only.
+    settings_volume: "./configs/torrserver/config/settings.json:/opt/torrserver/config/settings.json:ro"
+    # Пути для официального docker-entrypoint (`TS_CONF_PATH`, `TS_LOG_PATH`, `TS_TORR_DIR`).
+    path: "/opt/torrserver/config"
+    torrents_dir: "/opt/torrserver/torrents"
+    log_path_dir: "/opt/torrserver/log"
+    log_file: "torrserver.log"
+    weblog_file: "access.log"
   metacubexd:
     # Включить/выключить dashboard metacubexd.
     enabled: true
@@ -102,15 +129,60 @@ services:
     image: "docker.io/adguard/adguardhome:latest"
     # Использовать host-network для корректного клиентского IP и простоты маршрутизации.
     network_mode: "host"
-    # Директории внутри stack (относительно $USB/<stack.relative_dir>).
+    # Конфиг AdGuard Home (YAML) хранится в stack и бэкапится.
     conf_dir: "./configs/adguardhome/conf"
-    work_dir: "./configs/adguardhome/work"
+    # Runtime-данные AGH (data, фильтры, кэш, статистика) держим вне stack/
+    work_dir: "../adguardhome-runtime/work"
   # Пользовательские compose-сервисы (имя -> тело сервиса по Docker Compose spec).
   # Эти сервисы будут добавлены в общий docker-compose.yml как есть.
   # Smoke проверяет только встроенные сервисы проекта.
   # Документация формата сервиса:
   # https://docs.docker.com/reference/compose-file/services/
   custom: {}
+
+# Настройки TorrServer (рендерятся в configs/torrserver/config/settings.json).
+torrserver:
+  settings:
+    CacheSize: 33554432
+    ConnectionsLimit: 12
+    DisableDHT: true
+    DisablePEX: true
+    DisableTCP: false
+    DisableUPNP: true
+    DisableUTP: true
+    DisableUpload: true
+    DownloadRateLimit: 0
+    EnableDLNA: false
+    EnableDebug: false
+    EnableIPv6: false
+    EnableProxy: false
+    EnableRutorSearch: false
+    EnableTorznabSearch: false
+    ForceEncrypt: false
+    FriendlyName: ""
+    PeersListenPort: 0
+    PreloadCache: 20
+    ProxyHosts: null
+    ReaderReadAHead: 30
+    RemoveCacheOnDrop: false
+    ResponsiveMode: true
+    RetrackersMode: 1
+    ShowFSActiveTorr: true
+    SslCert: ""
+    SslKey: ""
+    SslPort: 0
+    StoreSettingsInJson: true
+    StoreViewedInJson: false
+    TMDBSettings:
+      APIKey: ""
+      APIURL: "https://api.themoviedb.org"
+      ImageURL: "https://image.tmdb.org"
+      ImageURLRu: "https://imagetmdb.com"
+    TorrentDisconnectTimeout: 20
+    TorrentsSavePath: "/opt/torrserver/torrents"
+    TorznabUrls: null
+    UploadRateLimit: 256000
+    UseDisk: false
 
 # Конфигурация приложения AdGuard Home (AdGuardHome.yaml, dnsmasq forward).
 # Сервис в Docker задаётся в services.adguardhome.

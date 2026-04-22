@@ -40,8 +40,24 @@ def create_backup(
     rel_stack = stack_path[len(usb_mount.rstrip("/")) :].lstrip("/")
     if rel_stack:
         ssh.exec_text(
+            f"TS_CFG='{rel_stack}/configs/torrserver'; "
+            f"AGH_WORK='{rel_stack}/configs/adguardhome/work'; "
+            f"MIHOMO_OLD='{rel_stack}/configs/mihomo'; "
+            f"V2RAYA_OLD='{rel_stack}/configs/v2raya'; "
             f"if [ -d '{stack_path}' ]; then "
-            f"cd '{usb_mount}' && tar czf '{stack_tar}' '{rel_stack}'; "
+            f"cd '{usb_mount}' && tar czf '{stack_tar}' "
+            "--exclude=\"${TS_CFG}/TorrServer-*\" "
+            "--exclude=\"${TS_CFG}/torrents\" "
+            "--exclude=\"${TS_CFG}/cache\" "
+            "--exclude=\"${TS_CFG}/log\" "
+            "--exclude=\"${TS_CFG}/*.log\" "
+            "--exclude=\"${AGH_WORK}\" "
+            "--exclude=\"${AGH_WORK}/*\" "
+            "--exclude=\"${MIHOMO_OLD}\" "
+            "--exclude=\"${MIHOMO_OLD}/*\" "
+            "--exclude=\"${V2RAYA_OLD}\" "
+            "--exclude=\"${V2RAYA_OLD}/*\" "
+            f"'{rel_stack}'; "
             f"else : > '{stack_tar}'; fi"
         )
     else:

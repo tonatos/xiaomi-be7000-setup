@@ -1,0 +1,130 @@
+---
+description: "Справочник: аппаратное и программное окружение роутера Xiaomi BE7000. Используется при работе с шаблонами, скриптами маршрутизации и Docker-конфигурацией."
+globs:
+  - "templates/**"
+  - "config/**"
+  - "src/**"
+alwaysApply: false
+---
+
+# Окружение роутера Xiaomi BE7000
+
+## Железо и ядро
+
+- **Процессор**: Qualcomm IPQ9574 (aarch64)
+- **ОС/прошивка**: XiaoQiang (закрытый форк OpenWrt)
+- **Ядро Linux**: `5.4.164 #0 SMP PREEMPT` aarch64
+- **SSH**: поддерживает только legacy `ssh-rsa`; при подключении нужны флаги `-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa`
+- **Shell**: BusyBox ash; `python3`, `file`, `tcpdump` — **отсутствуют**; есть `sed`, `awk`, `curl`
+
+## Сеть
+
+| Интерфейс | Роль |
+|-----------|------|
+| `eth0` | WAN |
+| `eth1`–`eth4` | LAN (все члены `br-lan`) |
+| `wl0`, `wl1` | Wi-Fi (тоже члены `br-lan`) |
+| `br-lan` | LAN-бридж (192.168.31.0/24 по умолчанию) |
+| `br-docker` | Docker network |
+| `Meta` | TUN-интерфейс mihomo (поднимается при `tun.enable: true`) |
+
+**ECM (Enhanced Connection Manager)** — активен. Ускоряет forwarding в hardware (PPE/SFE).
+Iptables `PREROUTING` и `FORWARD` всё равно работают; `TPROXY` функционирует корректно.
+
+## Загруженные модули ядра (нетфильтр/туннели)
+
+```
+xt_TPROXY         — TPROXY target, работает
+xt_socket         — socket match для TPROXY
+nf_tproxy_ipv4    — IPv4 TPROXY implementation
+nf_tproxy_ipv6    — IPv6 TPROXY implementation
+nf_socket_ipv4    — поддержка xt_socket
+nf_socket_ipv6    — поддержка xt_socket
+tun               — TUN/TAP виртуальные интерфейсы
+```
+
+`/dev/net/tun` существует, доступен root'у.
+
+## iptables
+
+- Версия: **iptables v1.6.2** (legacy, не nft)
+- Таблицы: `filter`, `nat`, `mangle`, `raw` — все доступны
+- `iptables -t mangle -j TPROXY` — **работает**
+- `ip rule add fwmark` / `ip route table` — **работает**
+- `iptables-mod-tproxy` установлен через opkg
+- **nftables** — отсутствует в прошивке
+
+## Пакетный менеджер
+
+`opkg` доступен. Установленные пакеты (релевантные):
+
+```
+iptables-mod-tproxy   1.6.2-2
+iptables-mod-conntrack-extra
+iptables-mod-ipset
+kmod-br-netfilter
+```
+
+Entware-opt монтируется на `/opt` (bind-mount с USB при наличии).
+
+## Docker
+
+| Параметр | Значение |
+|----------|----------|
+| Daemon | `dockerd` v20.10.17 |
+| Socket | `/var/run/docker.sock` |
+| Бинарники | `/mnt/usb-*/mi_docker/docker-binaries/` |
+| Compose | **standalone** v5.1.1 — `/mnt/usb-*/opt/docker-cli/cli-plugins/docker-compose` |
+| Compose синтаксис | `docker-compose up -d ...` (НЕ `docker compose`) |
+| Образы/overlayfs | `/mnt/usb-*/mi_docker/` |
+
+**Ограничение прошивки**: тома и каталоги стека **обязаны** находиться под `/mnt/usb-*/…`.
+
+## TUN-режим mihomo в Docker
+
+Требования для работы TUN в контейнере:
+
+```yaml
+cap_add:
+  - NET_ADMIN
+devices:
+  - /dev/net/tun
+```
+
+При `tun.enable: true` mihomo автоматически:
+- Создаёт интерфейс `Meta` (mtu 9000)
+- Настраивает ip rule (приоритеты 9000–9010)
+- Добавляет таблицу маршрутизации 2022: `default via 198.18.0.2 dev Meta`
+
+Эти правила перехватывают **весь не-loopback трафик** (включая forwarded из LAN) и заворачивают в TUN.
+
+## Поведение FORWARD chain
+
+LAN-клиенты (Wi-Fi + проводные) подключены через `br-lan` (bridge).
+В chain FORWARD есть правило:
+```
+ACCEPT all -- PHYSDEV match --physdev-is-bridged
+```
+Это означает: **bridged-трафик из LAN принимается без дополнительных правил**,
+даже если output-интерфейс — TUN `Meta`.
+
+## Проверенные возможности (результат экспериментов)
+
+| Возможность | Статус |
+|-------------|--------|
+| TUN mode mihomo в Docker | ✅ Работает |
+| QUIC/UDP через TUN (IN=br-lan OUT=Meta) | ✅ Пакеты доходят до TUN |
+| TPROXY target iptables | ✅ Работает |
+| Policy routing (ip rule / ip route table) | ✅ Работает |
+| NAT REDIRECT (redir-port) TCP | ✅ Работает (текущий основной метод) |
+| block_quic FORWARD DROP | ⚠️ Не нужен при TUN (блокирует UDP до TUN) |
+| nftables | ❌ Отсутствует |
+| python3 / tcpdump на хосте | ❌ Отсутствуют |
+
+## Autorun
+
+Скрипты автозапуска расположены в `/data/startup/autoruns/`.
+UCI firewall include подключает их при старте:
+- `010-start-docker.sh` — дождаться USB, при необходимости поднять `mi_docker`
+- `005-ensure-shell-env.sh` — на каждом boot восстанавливает hook `usb-env` в `/etc/profile` (если прошивка перезаписала файл)
+- `020-proxy-routing.sh` — один скрипт: по `router.yaml` / `proxy_client` только выбранный клиент (mihomo **или** v2raya) + применение `stack/routing/lan-routing.sh` (в артефактах **нет** отдельного `021-*.sh`)

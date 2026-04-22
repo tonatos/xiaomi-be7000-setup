@@ -119,13 +119,16 @@ def build_render_context(cfg: dict[str, Any], usb_mount: str) -> dict[str, Any]:
     mihomo_controller_port = _extract_mihomo_controller_port(cfg)
     return {
         **cfg,
+        "proxy_client": str(cfg.get("proxy_client", "mihomo")).strip() or "mihomo",
         "usb_mount": usb_mount,
         "stack_path": stack_path,
         "docker_bin": docker_bin,
         "startup_base": startup.get("base_dir", "/data/startup"),
         "startup_autoruns": startup.get("autoruns_subdir", "autoruns"),
+        "services_mihomo_enabled": mihomo_enabled,
         "services_mihomo_redir_port": sm.get("redir_port", 7891),
         "services_mihomo_container_name": sm.get("container_name", "mihomo"),
+        "services_v2raya_enabled": v2raya_enabled,
         "services_v2raya_port": sv2.get("port", 2017),
         "services_v2raya_redir_port": sv2.get("redir_port", 52345),
         "services_v2raya_container_name": sv2.get("container_name", "v2raya"),
@@ -185,7 +188,11 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
 
     # mihomo
     tpl = env.get_template("mihomo/config.yaml.j2")
-    w("configs/mihomo/config.yaml", tpl.render(**ctx))
+    w("configs/mihomo-config/config.yaml", tpl.render(**ctx))
+
+    # torrserver
+    tpl = env.get_template("torrserver/settings.json.j2")
+    w("configs/torrserver/config/settings.json", tpl.render(**ctx))
 
     # Общие iptables для LAN (mihomo NAT / v2raya + block_quic)
     tpl = env.get_template("routing/lan-routing.sh.j2")
@@ -209,17 +216,28 @@ def render_all(cfg: dict[str, Any], usb_mount: str, out_dir: Path | None = None)
     w("startup/startup.sh", tpl.render(**ctx))
     (out / "startup/startup.sh").chmod(0o755)
 
+    tpl = env.get_template("autorun/005-ensure-shell-env.sh.j2")
+    w("startup/autoruns/005-ensure-shell-env.sh", tpl.render(**ctx))
+    (out / "startup/autoruns/005-ensure-shell-env.sh").chmod(0o755)
+
     tpl = env.get_template("autorun/010-start-docker.sh.j2")
     w("startup/autoruns/010-start-docker.sh", tpl.render(**ctx))
     (out / "startup/autoruns/010-start-docker.sh").chmod(0o755)
 
-    tpl = env.get_template("autorun/020-mihomo-routing.sh.j2")
-    w("startup/autoruns/020-mihomo-routing.sh", tpl.render(**ctx))
-    (out / "startup/autoruns/020-mihomo-routing.sh").chmod(0o755)
-
-    tpl = env.get_template("autorun/021-v2raya-routing.sh.j2")
-    w("startup/autoruns/021-v2raya-routing.sh", tpl.render(**ctx))
-    (out / "startup/autoruns/021-v2raya-routing.sh").chmod(0o755)
+    proxy_client = str(ctx.get("proxy_client", "mihomo")).strip()
+    proxy_tpl_by_client = {
+        "mihomo": "autorun/020-proxy-routing-mihomo.sh.j2",
+        "v2raya": "autorun/020-proxy-routing-v2raya.sh.j2",
+    }
+    proxy_tpl = proxy_tpl_by_client.get(proxy_client)
+    if proxy_tpl is None:
+        raise ValueError(
+            "proxy_client: ожидается 'mihomo' или 'v2raya', "
+            f"получено '{proxy_client}'"
+        )
+    tpl = env.get_template(proxy_tpl)
+    w("startup/autoruns/020-proxy-routing.sh", tpl.render(**ctx))
+    (out / "startup/autoruns/020-proxy-routing.sh").chmod(0o755)
 
     # marker for sync
     (out / ".xiaomi_router_revision").write_text(

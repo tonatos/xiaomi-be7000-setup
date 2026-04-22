@@ -1,0 +1,37 @@
+#!/bin/sh
+# Восстановление hook для usb-env в /etc/profile после перезагрузки.
+# Прошивка Xiaomi может перезаписывать /etc/profile на boot.
+
+_ensure_usb_env_profile_hook() {
+    TAG="shell-env-autostart"
+    BEGIN_MARKER="# xiaomi-be7000-setup usb-env BEGIN"
+
+    if grep -qF "$BEGIN_MARKER" /etc/profile 2>/dev/null; then
+        return 0
+    fi
+
+    cat >> /etc/profile << 'EOF'
+
+# xiaomi-be7000-setup usb-env BEGIN
+_xiaomi_usb_env_loaded=""
+for _xiaomi_usb_env in /mnt/usb*/opt/usb-env.sh; do
+  [ -f "$_xiaomi_usb_env" ] || continue
+  . "$_xiaomi_usb_env" 2>/dev/null || true
+  _xiaomi_usb_env_loaded=1
+  break
+done
+if [ -z "$_xiaomi_usb_env_loaded" ]; then
+  for _xiaomi_compose_env in /mnt/usb*/opt/docker-cli/compose-env.sh; do
+    [ -f "$_xiaomi_compose_env" ] || continue
+    . "$_xiaomi_compose_env" 2>/dev/null || true
+    break
+  done
+fi
+unset _xiaomi_usb_env _xiaomi_compose_env _xiaomi_usb_env_loaded
+# xiaomi-be7000-setup usb-env END
+EOF
+
+    logger -t $TAG "Добавлен/восстановлен hook usb-env в /etc/profile"
+}
+
+_ensure_usb_env_profile_hook

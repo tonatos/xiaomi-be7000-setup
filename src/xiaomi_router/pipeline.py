@@ -360,21 +360,38 @@ def deploy(
 
         log("[4/6] Загрузка файлов на роутер...")
         ssh.exec_text(
-            f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo' '{stack}/configs/v2raya' "
-            f"'{stack}/configs/adguardhome/conf' '{stack}/configs/adguardhome/work' "
+            f"mkdir -p '{stack}/configs/xray' '{stack}/configs/mihomo-config' "
+            f"'{stack}/configs/torrserver/config' "
+            f"'{stack}/configs/adguardhome/conf' "
             f"'{stack}/routing'"
+        )
+        # Runtime-каталоги вынесены вне stack (compose default ../...).
+        # Для AGH мигрируем legacy-data из stack/configs/adguardhome/work, если новое место пустое.
+        ssh.exec_text(
+            f"mkdir -p '{usb}/torrserver-runtime' '{usb}/adguardhome-runtime/work' "
+            f"'{usb}/mihomo-runtime' '{usb}/v2raya-runtime'; "
+            f"if [ -d '{stack}/configs/adguardhome/work' ] && "
+            f"[ -z \"$(ls -A '{usb}/adguardhome-runtime/work' 2>/dev/null)\" ]; then "
+            f"cp -a '{stack}/configs/adguardhome/work/.' '{usb}/adguardhome-runtime/work/' 2>/dev/null || true; "
+            "fi"
+        )
+        # Очистить управляемые autorun-скрипты перед заливкой:
+        # так не остаются хвосты после переименований/переключений клиента.
+        ssh.exec_text(
+            f"rm -f {startup_base}/autoruns/* 2>/dev/null || true"
         )
         uploads = [
             (out / "docker-compose.yml",                          f"{stack}/docker-compose.yml",                                   None),
             (out / "configs/xray/config.json",                    f"{stack}/configs/xray/config.json",                             None),
-            (out / "configs/mihomo/config.yaml",                  f"{stack}/configs/mihomo/config.yaml",                           None),
+            (out / "configs/mihomo-config/config.yaml",           f"{stack}/configs/mihomo-config/config.yaml",                    None),
+            (out / "configs/torrserver/config/settings.json",     f"{stack}/configs/torrserver/config/settings.json",              None),
             (out / "configs/adguardhome/conf/AdGuardHome.yaml",   f"{stack}/configs/adguardhome/conf/AdGuardHome.yaml",            None),
             (out / "routing/lan-routing.sh",                      f"{stack}/routing/lan-routing.sh",                               0o755),
             (out / "routing/rollback.sh",                         f"{stack}/routing/rollback.sh",                                  0o755),
             (out / "startup/startup.sh",                          f"{startup_base}/startup.sh",                                    0o755),
+            (out / "startup/autoruns/005-ensure-shell-env.sh",    f"{startup_base}/autoruns/005-ensure-shell-env.sh",              0o755),
             (out / "startup/autoruns/010-start-docker.sh",        f"{startup_base}/autoruns/010-start-docker.sh",                  0o755),
-            (out / "startup/autoruns/020-mihomo-routing.sh",      f"{startup_base}/autoruns/020-mihomo-routing.sh",                0o755),
-            (out / "startup/autoruns/021-v2raya-routing.sh",      f"{startup_base}/autoruns/021-v2raya-routing.sh",                0o755),
+            (out / "startup/autoruns/020-proxy-routing.sh",     f"{startup_base}/autoruns/020-proxy-routing.sh",                 0o755),
         ]
         for local, remote, mode in uploads:
             log(f"      → {remote}")
@@ -451,7 +468,7 @@ def pull_configs(
         dest.mkdir(parents=True, exist_ok=True)
         for rel in (
             "configs/xray/config.json",
-            "configs/mihomo/config.yaml",
+            "configs/mihomo-config/config.yaml",
             "configs/adguardhome/conf/AdGuardHome.yaml",
             "docker-compose.yml",
             "routing/lan-routing.sh",
@@ -482,7 +499,14 @@ def push_rendered_only(cfg: dict[str, Any], local_rendered: Path | None = None) 
         stack = _stack_path(cfg, usb)
         ssh.upload_file(out / "docker-compose.yml", f"{stack}/docker-compose.yml")
         ssh.upload_file(out / "configs/xray/config.json", f"{stack}/configs/xray/config.json")
-        ssh.upload_file(out / "configs/mihomo/config.yaml", f"{stack}/configs/mihomo/config.yaml")
+        ssh.upload_file(
+            out / "configs/mihomo-config/config.yaml",
+            f"{stack}/configs/mihomo-config/config.yaml",
+        )
+        ssh.upload_file(
+            out / "configs/torrserver/config/settings.json",
+            f"{stack}/configs/torrserver/config/settings.json",
+        )
         ssh.upload_file(
             out / "configs/adguardhome/conf/AdGuardHome.yaml",
             f"{stack}/configs/adguardhome/conf/AdGuardHome.yaml",

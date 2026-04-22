@@ -21,8 +21,13 @@ services:
     devices:
       - /dev/net/tun
     volumes:
-      # mihomo подкачивает GeoSite/GeoIP в runtime, поэтому каталог должен быть RW
-      - ./configs/mihomo:/root/.config/mihomo
+{% if services.mihomo.volume is defined %}
+      - "{{ services.mihomo.volume }}"
+{% else %}
+      # Runtime mihomo (GeoSite/GeoIP и кэш) держим вне stack.
+      - "{{ services.mihomo.runtime_volume | default('../mihomo-runtime:/root/.config/mihomo') }}"
+      - "{{ services.mihomo.settings_volume | default('./configs/mihomo-config/config.yaml:/root/.config/mihomo/config.yaml:ro') }}"
+{% endif %}
 {% endif %}
 {% if services.v2raya.enabled | default(false) %}
 
@@ -40,15 +45,49 @@ services:
     volumes:
       - /lib/modules:/lib/modules:ro
       - /etc/resolv.conf:/etc/resolv.conf
-      - ./configs/v2raya:/etc/v2raya
+{% if services.v2raya.volume is defined %}
+      - "{{ services.v2raya.volume }}"
+{% else %}
+      - "{{ services.v2raya.runtime_volume | default('../v2raya-runtime:/etc/v2raya') }}"
 {% endif %}
-{% if services.torrserver.enabled | default(true) %}
+{% endif %}
+{% set ts = services.torrserver | default({}) %}
+{% if ts.enabled | default(true) %}
 
-  {{ services.torrserver.container_name }}:
-    image: {{ services.torrserver.image | tojson }}
-    container_name: {{ services.torrserver.container_name | tojson }}
+  {{ ts.container_name | default("torrserver") }}:
+    image: {{ ts.image | default("ghcr.io/yourok/torrserver:latest") | tojson }}
+    container_name: {{ ts.container_name | default("torrserver") | tojson }}
     restart: unless-stopped
     network_mode: host
+{% if ts.mem_limit is defined %}
+    mem_limit: {{ ts.mem_limit | tojson }}
+{% endif %}
+{% if ts.pids_limit is defined %}
+    pids_limit: {{ ts.pids_limit }}
+{% endif %}
+{% if ts.ulimits is defined %}
+    ulimits:
+{{ ts.ulimits | toyaml | indent(6, first=True) }}
+{% endif %}
+    environment:
+      - TS_PORT={{ ts.port | default(8090) }}
+      # ghcr.io/yourok/torrserver uses TS_CONF_PATH/TS_LOG_PATH/TS_TORR_DIR.
+      - TS_CONF_PATH={{ ts.path | default("/opt/torrserver/config") }}
+      - TS_LOG_PATH={{ ts.log_path | default((ts.log_path_dir | default("/opt/torrserver/log")) ~ "/" ~ (ts.log_file | default("torrserver.log"))) }}
+      - TS_TORR_DIR={{ ts.torrents_dir | default("/opt/torrserver/torrents") }}
+{% if ts.environment is defined %}
+{{ ts.environment | toyaml | indent(6, first=True) }}
+{% endif %}
+    volumes:
+{% if ts.volume is defined %}
+      - "{{ ts.volume }}"
+{% else %}
+      - "{{ ts.runtime_volume | default('../torrserver-runtime:/opt/torrserver') }}"
+      - "{{ ts.settings_volume | default('./configs/torrserver/config/settings.json:/opt/torrserver/config/settings.json:ro') }}"
+{% endif %}
+{% if ts.volumes is defined %}
+{{ ts.volumes | toyaml | indent(6, first=True) }}
+{% endif %}
 {% endif %}
 {% set metacubexd = services.metacubexd | default({}) %}
 {% if metacubexd.enabled | default(true) %}
@@ -77,6 +116,6 @@ services:
     restart: unless-stopped
     network_mode: {{ agh.network_mode | default("host") | tojson }}
     volumes:
-      - "{{ agh.work_dir | default('./configs/adguardhome/work') }}:/opt/adguardhome/work"
+      - "{{ agh.work_dir | default('../adguardhome-runtime/work') }}:/opt/adguardhome/work"
       - "{{ agh.conf_dir | default('./configs/adguardhome/conf') }}:/opt/adguardhome/conf"
 {% endif %}

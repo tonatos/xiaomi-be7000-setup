@@ -10,8 +10,8 @@ logger -t startup "Running autoruns from $BASEDIR"
 
 for f in "$BASEDIR"/*; do
     [ -x "$f" ] || continue
-    logger -t startup "Executing $f"
-    "$f" 2>&1 | logger -t startup
+    logger -t startup "Spawning $f in background"
+    sh "$f" </dev/null >/dev/null 2>&1 &
 done
 
 touch "$LOCK"
