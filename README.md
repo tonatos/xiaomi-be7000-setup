@@ -16,6 +16,7 @@
     - [Окружение на USB (однократно)](#окружение-на-usb-однократно)
     - [Переменные окружения](#переменные-окружения)
     - [Управление прокси Mihomo](#управление-прокси-mihomo)
+    - [Правила роутинга Mihomo](#правила-роутинга-mihomo)
     - [Команды](#команды)
   - [Структура репозитория](#структура-репозитория)
   - [Подлключение собственных docker-контейнеров](#подлключение-собственных-docker-контейнеров)
@@ -312,6 +313,26 @@ task add-mihomo-proxy -- 'ss://...' --print
 | `ss://` | — | cipher, password, server, port |
 | `vless://` | tcp, ws, grpc, xhttp, h2 | security (tls/reality), sni, fp, pbk, sid, flow, alpn, path, host, mode |
 | `trojan://` | tcp, ws, grpc | sni, fp, alpn, allowInsecure, path, host |
+
+### Правила роутинга Mihomo
+
+Правила задаются в `mihomo.rules` вашего `config/router.yaml` (база — в `config/router.base.yaml`), порядок важен: проверяются сверху вниз.
+
+Минимальный шаблон для своих правил:
+```yaml
+mihomo:
+  rules:
+    - DOMAIN-SUFFIX,example.com,Proxy
+    - GEOIP,RU,DIRECT
+    - MATCH,DIRECT
+```
+
+Что есть в базе по умолчанию:
+- `RULE-SET,refilter_domains,Proxy` — доменные списки `re:filter` через прокси.
+- `RULE-SET,refilter_ips,Proxy` — IP-списки `re:filter` через прокси.
+- `GEOSITE,category-ai-!cn,Proxy` — AI-сервисы через прокси.
+- `GEOIP,CN,DIRECT`, `GEOIP,RU,DIRECT` — Китай и РФ напрямую.
+- `MATCH,DIRECT` — всё остальное напрямую (последнее правило-fallback).
 
 ### Команды
 
