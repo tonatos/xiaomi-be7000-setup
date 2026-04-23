@@ -48,7 +48,7 @@
 
 DevOps-ориентированный конфигуратор для Xiaomi BE7000 (стоковая прошивка на базе OpenWrt): Docker Compose, **Xray (VLESS+Reality)**, **mihomo**, **AdGuard Home**, **TorrServer**, автозапуск через UCI firewall include, бэкап/откат и smoke-проверки. Что умеет:
 
-- устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha) в **TUN-режиме** (перехватывает TCP и UDP/QUIC из LAN), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера (Shadowsocks или Vless, для развертывания сервера можно использовать [https://getoutline.org/ru/](https://getoutline.org/ru/))
+- устанавливает селективный Proxy клиент [Mihomo](https://github.com/MetaCubeX/mihomo/tree/Alpha) в **TUN-режиме** (перехватывает TCP и UDP/QUIC из LAN), с настройками маршрутизации на основе [re:filter](https://github.com/1andrevich/Re-filter-lists) и [Geosite](https://github.com/v2fly/domain-list-community/tree/master), до вашего proxy-сервера
   - в качестве опции, вместо Mihomo вы можете использовать клиент [v2rayA](https://github.com/v2rayA/v2rayA), если вам привычна настройка клиента и правил через Web GUI
 - [Mihomo Dashboard](https://github.com/MetaCubeX/metacubexd) — интерфейс для мониторинга вашего Mihomo-клиента
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) — DNS-фильтрация (реклама/трекинг/вредоносные домены) с автоматической интеграцией в `dnsmasq`
@@ -59,6 +59,9 @@ DevOps-ориентированный конфигуратор для Xiaomi BE7
 В итоге, ваш роутер сможет маршрутизировать трафик в домашней сети, обходя ограничения "с обоих сторон" (в том числе, сервисов, которые заблокировали доступ для российских пользователей) через Shadowsocks и проксируя напрямую весь отечественный трафик (банки, госсервисы). 
 
 Помимо этого, если у вас есть белый IP, вы можете настроить роутер как Xray-сервер для подключения своих смартфонов, чтобы использовать настроенные правила маршрутизации без необходимости выключать proxy-клиент при использовании отечественных сервисов.
+
+Для развертывания Xray-сервера с поддержкой протоколов VLESS + XTLS-Reality / VLESS + xHTTP + TLS можно использовать конфигуратор [xray-server
+](https://github.com/tonatos/xray-server-remote-setup), он автоматически развернет сервер на вашем VPS. Либо, воспользоваться любым инсталлером на просторах сети (например, популярный [x-ui-pro](https://github.com/GFW4Fun/x-ui-pro)) или развернуть самостоятельно по [документации](https://xtls.github.io/en/config/).
 
 В качестве зависимости, конфигуратор использует [xmir-patcher](https://github.com/openwrt-xiaomi/xmir-patcher) (эксплойт/доступ к устройству и постоянный dropbear) для получения ssh-доступа к роутеру.
 
