@@ -97,6 +97,20 @@ xray:
 routing:
   # IP устройств вне transparent proxy (Xbox/PS и т.п. с чувствительным NAT).
   excluded_ips: []
+  # Опциональный runtime-тюнинг datapath (RPS/XPS/RFS): помогает распределить softirq
+  # по ядрам и поднять throughput при TUN/REDIRECT на части роутеров.
+  performance_tuning:
+    enabled: false
+    # Для 4 ядер используйте "f" (CPU0-CPU3).
+    cpu_mask: "f"
+    rps_sock_flow_entries: 32768
+    rps_flow_cnt: 4096
+    interfaces:
+      - "eth0"
+      - "br-lan"
+      - "Meta"
+      - "wl0"
+      - "wl1"
 
 mihomo:
   # Обязательно раскомментируйте и заполните proxies (реальный server и учётные данные).

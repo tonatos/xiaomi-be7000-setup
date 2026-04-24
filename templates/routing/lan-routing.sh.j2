@@ -19,6 +19,11 @@
 {% set router_output_enabled = routing.apply_router_output_iptables | default(true) %}
 {% set router_output_fake_cidr = routing.router_output_fake_cidr | default('198.18.0.0/16') %}
 {% set tun_enabled = mihomo.tun.enable | default(false) if pc == 'mihomo' else (v2raya_mode == 'tun') %}
+{% set perf_tuning_enabled = routing.performance_tuning.enabled | default(false) %}
+{% set perf_tuning_interfaces = routing.performance_tuning.interfaces | default(['eth0', 'br-lan', 'Meta', 'wl0', 'wl1']) %}
+{% set perf_tuning_cpu_mask = routing.performance_tuning.cpu_mask | default('f') %}
+{% set perf_tuning_rps_sock_flow_entries = routing.performance_tuning.rps_sock_flow_entries | default(32768) %}
+{% set perf_tuning_rps_flow_cnt = routing.performance_tuning.rps_flow_cnt | default(4096) %}
 CHAIN_MIHOMO="MIHOMO_{{ services.mihomo.container_name | default('mihomo') | upper | replace('-', '_') }}"
 CHAIN_V2RAYA="V2RAYA_{{ services.v2raya.container_name | default('v2raya') | upper | replace('-', '_') }}"
 
@@ -41,7 +46,63 @@ _cleanup_v2raya_nat() {
     iptables -t nat -X "$CHAIN_V2RAYA" 2>/dev/null || true
 }
 
+_apply_perf_tuning() {
+    [ -d /tmp/rpsxps-backup ] || mkdir -p /tmp/rpsxps-backup
+{% for ifn in perf_tuning_interfaces %}
+    if [ -d "/sys/class/net/{{ ifn }}" ]; then
+        for f in /sys/class/net/{{ ifn }}/queues/rx-*/rps_cpus; do
+            [ -f "$f" ] || continue
+            bn="$(echo "$f" | tr '/' '_')"
+            cur="$(cat "$f" 2>/dev/null || true)"
+            [ -n "$cur" ] && echo "$cur" > "/tmp/rpsxps-backup/${bn}.bak"
+            echo "{{ perf_tuning_cpu_mask }}" > "$f" 2>/dev/null || true
+        done
+        for f in /sys/class/net/{{ ifn }}/queues/tx-*/xps_cpus; do
+            [ -f "$f" ] || continue
+            bn="$(echo "$f" | tr '/' '_')"
+            cur="$(cat "$f" 2>/dev/null || true)"
+            [ -n "$cur" ] && echo "$cur" > "/tmp/rpsxps-backup/${bn}.bak"
+            echo "{{ perf_tuning_cpu_mask }}" > "$f" 2>/dev/null || true
+        done
+    fi
+{% endfor %}
+    if [ -f /proc/sys/net/core/rps_sock_flow_entries ]; then
+        cur="$(cat /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true)"
+        [ -n "$cur" ] && echo "$cur" > /tmp/rpsxps-backup/rps_sock_flow_entries.bak
+        echo "{{ perf_tuning_rps_sock_flow_entries }}" > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true
+    fi
+    for f in /sys/class/net/*/queues/rx-*/rps_flow_cnt; do
+        [ -f "$f" ] && echo "{{ perf_tuning_rps_flow_cnt }}" > "$f" 2>/dev/null || true
+    done
+    logger -t lan-routing "performance_tuning enabled: rps/xps mask={{ perf_tuning_cpu_mask }}, rfs={{ perf_tuning_rps_sock_flow_entries }}"
+}
+
+_cleanup_perf_tuning() {
+    [ -d /tmp/rpsxps-backup ] || return 0
+    for b in /tmp/rpsxps-backup/_sys_class_net_*_rps_cpus.bak; do
+        [ -f "$b" ] || continue
+        f="$(echo "${b#/tmp/rpsxps-backup/}" | sed 's/\.bak$//' | tr '_' '/')"
+        [ -f "$f" ] || continue
+        cat "$b" > "$f" 2>/dev/null || true
+    done
+    for b in /tmp/rpsxps-backup/_sys_class_net_*_xps_cpus.bak; do
+        [ -f "$b" ] || continue
+        f="$(echo "${b#/tmp/rpsxps-backup/}" | sed 's/\.bak$//' | tr '_' '/')"
+        [ -f "$f" ] || continue
+        cat "$b" > "$f" 2>/dev/null || true
+    done
+    if [ -f /tmp/rpsxps-backup/rps_sock_flow_entries.bak ] && [ -f /proc/sys/net/core/rps_sock_flow_entries ]; then
+        cat /tmp/rpsxps-backup/rps_sock_flow_entries.bak > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true
+    fi
+    logger -t lan-routing "performance_tuning cleanup applied from /tmp/rpsxps-backup"
+}
+
 _start() {
+{% if perf_tuning_enabled %}
+    _apply_perf_tuning
+{% else %}
+    _cleanup_perf_tuning
+{% endif %}
 {% if pc == 'mihomo' %}
 {% if tun_enabled and mihomo_enabled %}
     # Для TUN-пути LAN -> Meta нужна явная FORWARD-разрешалка:
@@ -159,6 +220,7 @@ _stop() {
     _cleanup_mihomo_nat
     _cleanup_v2raya_nat
     _cleanup_tun_forward_accept
+    _cleanup_perf_tuning
 {% if routing.block_quic | default(false) and not tun_enabled %}
     iptables -D FORWARD -s {{ routing.lan_cidr }} -p udp --dport 443 -j DROP 2>/dev/null || true
 {% endif %}

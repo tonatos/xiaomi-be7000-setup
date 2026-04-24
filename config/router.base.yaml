@@ -288,6 +288,24 @@ routing:
   # УСТАРЕЛО при TUN-режиме: TUN перехватывает UDP/QUIC и заворачивает в прокси.
   # Оставлено для режима без TUN (apply_iptables без tun.enable).
   block_quic: false
+  performance_tuning:
+    # Включить runtime-тюнинг RPS/XPS/RFS для лучшего распределения softirq по ядрам.
+    # Полезно при высоком трафике через TUN/REDIRECT на роутерах с перекосом NET_RX в одно ядро.
+    # Применяется в routing/lan-routing.sh на start и снимается на stop.
+    enabled: false
+    # Какие интерфейсы тюнить (если есть в системе). Пустой список => ничего не менять.
+    interfaces:
+      - "eth0"
+      - "br-lan"
+      - "Meta"
+      - "wl0"
+      - "wl1"
+    # Маска CPU для rps_cpus/xps_cpus (hex bitmask): "f" для 4 ядер (CPU0-CPU3).
+    cpu_mask: "f"
+    # Глобальный размер таблицы RFS.
+    rps_sock_flow_entries: 32768
+    # rps_flow_cnt на каждую RX-очередь.
+    rps_flow_cnt: 4096
 
 # Ключи здесь соответствуют нативному формату mihomo.
 # Документация: https://wiki.metacubex.one/config/

@@ -501,6 +501,20 @@ Mihomo запускается в **TUN-режиме** (`mihomo.tun.enable: true`
 
 **Гибридный режим** (`routing.apply_iptables: true`): поверх TUN добавляется NAT REDIRECT для TCP через `redir-port`. Используется, если TUN по каким-то причинам не перехватывает нужный трафик.
 
+**Тюнинг производительности datapath (опционально)**: если при TUN/REDIRECT throughput упирается в `softirq` и заметен перекос `NET_RX` по ядрам, можно включить runtime-настройки RPS/XPS/RFS:
+
+```yaml
+routing:
+  performance_tuning:
+    enabled: true
+    cpu_mask: "f"               # 4 ядра (CPU0-CPU3)
+    rps_sock_flow_entries: 32768
+    rps_flow_cnt: 4096
+    interfaces: ["eth0", "br-lan", "Meta", "wl0", "wl1"]
+```
+
+Параметры применяются скриптом `routing/lan-routing.sh` на `start` и откатываются на `stop`.
+
 ### v2rayA
 
 Рекомендуемый режим для v2rayA — **TUN**:

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.2] — 2026-04-24
+
+- В `routing/lan-routing.sh` добавлен опциональный runtime-тюнинг `routing.performance_tuning` (RPS/XPS/RFS): настройка `rps_cpus`, `xps_cpus`, `rps_sock_flow_entries` и `rps_flow_cnt` для выбранных интерфейсов, с автоматическим применением на `start` и откатом на `stop`
+- В `config/router.base.yaml` и `config/router.example.yaml` добавлена секция `routing.performance_tuning` с дефолтами для Xiaomi BE7000 (маска CPU, список интерфейсов, RFS-параметры)
+- В `README.md` добавлена инструкция по включению `performance_tuning` для случаев, когда TUN/REDIRECT упирается в `softirq`
+
 ## [0.6.1] — 2026-04-22
 
 - В `autorun/010-start-docker.sh` добавлен auto-swap bootstrap: перед запуском Docker проверяется `SwapTotal`, при необходимости выполняется `swapon` существующего `/mnt/usb*/.swapfile`, а если файла нет — создаётся и инициализируется swapfile 256MB на USB (на случай, если этого не сделали через интерфейс, иначе память не хватает на запуск стека)
