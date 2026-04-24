@@ -3,8 +3,12 @@
 ## [0.6.2] — 2026-04-24
 
 - В `routing/lan-routing.sh` добавлен опциональный runtime-тюнинг `routing.performance_tuning` (RPS/XPS/RFS): настройка `rps_cpus`, `xps_cpus`, `rps_sock_flow_entries` и `rps_flow_cnt` для выбранных интерфейсов, с автоматическим применением на `start` и откатом на `stop`
+- Для `performance_tuning` добавлено неблокирующее ожидание появления `Meta`: если интерфейс ещё не поднят на `start`, запускается фоновый watcher (`meta_wait_seconds`), который применяет tuning после появления интерфейса
 - В `config/router.base.yaml` и `config/router.example.yaml` добавлена секция `routing.performance_tuning` с дефолтами для Xiaomi BE7000 (маска CPU, список интерфейсов, RFS-параметры)
 - В `README.md` добавлена инструкция по включению `performance_tuning` для случаев, когда TUN/REDIRECT упирается в `softirq`
+- В `lan-routing.sh` добавлен управляемый DNS REDIRECT для `mihomo`: LAN DNS (TCP/UDP 53) принудительно перенаправляется на `mihomo` (`routing.mihomo_dns_port`, по умолчанию `1053`), чтобы fake-ip и доменные правила применялись ко всем клиентам LAN независимо от апстримов `dnsmasq`
+- В `router.base.yaml` добавлены параметры `routing.mihomo_dns_redirect` (по умолчанию `true`) и `routing.mihomo_dns_port` для явного контроля DNS-пайплайна
+- В README добавлено описание DNS REDIRECT-поведения для TUN-режима `mihomo`
 
 ## [0.6.1] — 2026-04-22
 

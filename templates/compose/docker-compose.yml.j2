@@ -59,17 +59,8 @@ services:
     container_name: {{ ts.container_name | default("torrserver") | tojson }}
     restart: unless-stopped
     network_mode: host
-{% if ts.mem_limit is defined %}
-    mem_limit: {{ ts.mem_limit | tojson }}
-{% endif %}
-{% if ts.pids_limit is defined %}
-    pids_limit: {{ ts.pids_limit }}
-{% endif %}
-{% if ts.ulimits is defined %}
-    ulimits:
-{{ ts.ulimits | toyaml | indent(6, first=True) }}
-{% endif %}
     environment:
+      - TS_DONTKILL={{ ts.dontkill | default(0) }}
       - TS_PORT={{ ts.port | default(8090) }}
       # ghcr.io/yourok/torrserver uses TS_CONF_PATH/TS_LOG_PATH/TS_TORR_DIR.
       - TS_CONF_PATH={{ ts.path | default("/opt/torrserver/config") }}

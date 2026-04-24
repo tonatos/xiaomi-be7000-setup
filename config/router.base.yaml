@@ -91,16 +91,6 @@ services:
     image: "ghcr.io/yourok/torrserver:latest"
     # Порт TorrServer на роутере (host network).
     port: 8090
-    # Ограничение памяти контейнера (Compose mem_limit).
-    mem_limit: "128m"
-    # Ограничение числа процессов в контейнере.
-    pids_limit: 256
-    # ulimit для TorrServer.
-    ulimits:
-      nofile:
-        soft: 4096
-        hard: 8192
-    # Runtime-данные TorrServer (ядро, кэш, логи, torrents) держим вне stack/,
     # чтобы не раздувать stack-бэкапы.
     runtime_volume: "../torrserver-runtime:/opt/torrserver"
     # Только settings.json остаётся в stack/configs и монтируется read-only.
@@ -143,14 +133,14 @@ services:
 # Настройки TorrServer (рендерятся в configs/torrserver/config/settings.json).
 torrserver:
   settings:
-    CacheSize: 33554432
-    ConnectionsLimit: 12
-    DisableDHT: true
-    DisablePEX: true
+    CacheSize: 67108864
+    ConnectionsLimit: 25
+    DisableDHT: false
+    DisablePEX: false
     DisableTCP: false
-    DisableUPNP: true
-    DisableUTP: true
-    DisableUpload: true
+    DisableUPNP: false
+    DisableUTP: false
+    DisableUpload: false
     DownloadRateLimit: 0
     EnableDLNA: false
     EnableDebug: false
@@ -161,9 +151,11 @@ torrserver:
     ForceEncrypt: false
     FriendlyName: ""
     PeersListenPort: 0
-    PreloadCache: 20
+    # Буфер предзагрузки
+    PreloadCache: 50 
     ProxyHosts: null
-    ReaderReadAHead: 30
+    # Опережающий кеш
+    ReaderReadAHead: 95
     RemoveCacheOnDrop: false
     ResponsiveMode: true
     RetrackersMode: 1
@@ -178,10 +170,10 @@ torrserver:
       APIURL: "https://api.themoviedb.org"
       ImageURL: "https://image.tmdb.org"
       ImageURLRu: "https://imagetmdb.com"
-    TorrentDisconnectTimeout: 20
+    TorrentDisconnectTimeout: 30
     TorrentsSavePath: "/opt/torrserver/torrents"
     TorznabUrls: null
-    UploadRateLimit: 256000
+    UploadRateLimit: 0
     UseDisk: false
 
 # Конфигурация приложения AdGuard Home (AdGuardHome.yaml, dnsmasq forward).
@@ -282,6 +274,13 @@ routing:
   router_output_fake_cidr: "198.18.0.0/16"
   # CIDR вашей LAN (используется при генерации iptables-правил).
   lan_cidr: "192.168.31.0/24"
+  # Принудительно направлять DNS-запросы клиентов LAN (TCP/UDP 53) в DNS mihomo.
+  # Это нужно, чтобы fake-ip и доменные правила mihomo применялись для всех клиентов
+  # даже когда системный dnsmasq смотрит в провайдерские DNS.
+  mihomo_dns_redirect: true
+  # Порт DNS-сервера mihomo для LAN DNS REDIRECT.
+  # Должен совпадать с mihomo.dns.listen (по умолчанию 0.0.0.0:1053).
+  mihomo_dns_port: 1053
   # Список IP, исключённых из transparent proxy (например, Xbox/PS с чувствительным NAT).
   excluded_ips: []
   # Блокировать QUIC (UDP/443) через iptables FORWARD DROP.
@@ -295,17 +294,18 @@ routing:
     enabled: false
     # Какие интерфейсы тюнить (если есть в системе). Пустой список => ничего не менять.
     interfaces:
-      - "eth0"
       - "br-lan"
       - "Meta"
-      - "wl0"
-      - "wl1"
     # Маска CPU для rps_cpus/xps_cpus (hex bitmask): "f" для 4 ядер (CPU0-CPU3).
     cpu_mask: "f"
     # Глобальный размер таблицы RFS.
     rps_sock_flow_entries: 32768
     # rps_flow_cnt на каждую RX-очередь.
     rps_flow_cnt: 4096
+    # Если интерфейс Meta ещё не поднят в момент старта routing-скрипта,
+    # запускается фоновый watcher, который подождёт появление Meta и применит tuning.
+    # 0 = не ждать.
+    meta_wait_seconds: 30
 
 # Ключи здесь соответствуют нативному формату mihomo.
 # Документация: https://wiki.metacubex.one/config/

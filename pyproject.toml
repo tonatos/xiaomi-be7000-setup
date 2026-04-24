@@ -1,6 +1,6 @@
 [project]
 name = "xiaomi-be7000-setup"
-version = "0.6.2"
+version = "0.6.3"
 description = "IaC-конфигуратор Docker-стека и автозапуска для Xiaomi BE7000"
 authors = [
     {name = "Semyachkin Vitaly"}

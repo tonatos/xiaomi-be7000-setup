@@ -19,13 +19,20 @@
 {% set router_output_enabled = routing.apply_router_output_iptables | default(true) %}
 {% set router_output_fake_cidr = routing.router_output_fake_cidr | default('198.18.0.0/16') %}
 {% set tun_enabled = mihomo.tun.enable | default(false) if pc == 'mihomo' else (v2raya_mode == 'tun') %}
+
 {% set perf_tuning_enabled = routing.performance_tuning.enabled | default(false) %}
 {% set perf_tuning_interfaces = routing.performance_tuning.interfaces | default(['eth0', 'br-lan', 'Meta', 'wl0', 'wl1']) %}
 {% set perf_tuning_cpu_mask = routing.performance_tuning.cpu_mask | default('f') %}
 {% set perf_tuning_rps_sock_flow_entries = routing.performance_tuning.rps_sock_flow_entries | default(32768) %}
 {% set perf_tuning_rps_flow_cnt = routing.performance_tuning.rps_flow_cnt | default(4096) %}
+{% set perf_tuning_meta_wait_seconds = routing.performance_tuning.meta_wait_seconds | default(30) %}
+
+{% set mihomo_dns_redirect_enabled = routing.mihomo_dns_redirect | default(true) %}
+{% set mihomo_dns_port = routing.mihomo_dns_port | default(1053) %}
+
 CHAIN_MIHOMO="MIHOMO_{{ services.mihomo.container_name | default('mihomo') | upper | replace('-', '_') }}"
 CHAIN_V2RAYA="V2RAYA_{{ services.v2raya.container_name | default('v2raya') | upper | replace('-', '_') }}"
+META_TUNING_PID_FILE="/tmp/lan-routing-meta-tuning.pid"
 
 _cleanup_mihomo_nat() {
     iptables -t nat -D OUTPUT -p tcp -d {{ router_output_fake_cidr }} -j "$CHAIN_MIHOMO" 2>/dev/null || true
@@ -46,25 +53,73 @@ _cleanup_v2raya_nat() {
     iptables -t nat -X "$CHAIN_V2RAYA" 2>/dev/null || true
 }
 
+_apply_perf_tuning_interface() {
+    ifn="$1"
+    [ -d "/sys/class/net/$ifn" ] || return 0
+    for f in /sys/class/net/"$ifn"/queues/rx-*/rps_cpus; do
+        [ -f "$f" ] || continue
+        bn="$(echo "$f" | tr '/' '_')"
+        cur="$(cat "$f" 2>/dev/null || true)"
+        [ -n "$cur" ] && echo "$cur" > "/tmp/rpsxps-backup/${bn}.bak"
+        echo "{{ perf_tuning_cpu_mask }}" > "$f" 2>/dev/null || true
+    done
+    for f in /sys/class/net/"$ifn"/queues/tx-*/xps_cpus; do
+        [ -f "$f" ] || continue
+        bn="$(echo "$f" | tr '/' '_')"
+        cur="$(cat "$f" 2>/dev/null || true)"
+        [ -n "$cur" ] && echo "$cur" > "/tmp/rpsxps-backup/${bn}.bak"
+        echo "{{ perf_tuning_cpu_mask }}" > "$f" 2>/dev/null || true
+    done
+}
+
+_stop_meta_tuning_watcher() {
+    [ -f "$META_TUNING_PID_FILE" ] || return 0
+    pid="$(cat "$META_TUNING_PID_FILE" 2>/dev/null || true)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null || true
+    rm -f "$META_TUNING_PID_FILE"
+}
+
+_schedule_meta_tuning_watcher() {
+    max_wait="{{ perf_tuning_meta_wait_seconds }}"
+    [ "$max_wait" -gt 0 ] 2>/dev/null || return 0
+    if [ -f "$META_TUNING_PID_FILE" ]; then
+        old_pid="$(cat "$META_TUNING_PID_FILE" 2>/dev/null || true)"
+        if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    (
+        waited=0
+        while [ "$waited" -lt "$max_wait" ]; do
+            if [ -d "/sys/class/net/Meta" ]; then
+                [ -d /tmp/rpsxps-backup ] || mkdir -p /tmp/rpsxps-backup
+                _apply_perf_tuning_interface "Meta"
+                logger -t lan-routing "performance_tuning async: Meta is ready, tuning applied"
+                rm -f "$META_TUNING_PID_FILE"
+                exit 0
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+        logger -t lan-routing "performance_tuning async: Meta not ready in ${max_wait}s, skipped"
+        rm -f "$META_TUNING_PID_FILE"
+    ) >/dev/null 2>&1 &
+    echo $! > "$META_TUNING_PID_FILE"
+}
+
 _apply_perf_tuning() {
+    _stop_meta_tuning_watcher
     [ -d /tmp/rpsxps-backup ] || mkdir -p /tmp/rpsxps-backup
 {% for ifn in perf_tuning_interfaces %}
-    if [ -d "/sys/class/net/{{ ifn }}" ]; then
-        for f in /sys/class/net/{{ ifn }}/queues/rx-*/rps_cpus; do
-            [ -f "$f" ] || continue
-            bn="$(echo "$f" | tr '/' '_')"
-            cur="$(cat "$f" 2>/dev/null || true)"
-            [ -n "$cur" ] && echo "$cur" > "/tmp/rpsxps-backup/${bn}.bak"
-            echo "{{ perf_tuning_cpu_mask }}" > "$f" 2>/dev/null || true
-        done
-        for f in /sys/class/net/{{ ifn }}/queues/tx-*/xps_cpus; do
-            [ -f "$f" ] || continue
-            bn="$(echo "$f" | tr '/' '_')"
-            cur="$(cat "$f" 2>/dev/null || true)"
-            [ -n "$cur" ] && echo "$cur" > "/tmp/rpsxps-backup/${bn}.bak"
-            echo "{{ perf_tuning_cpu_mask }}" > "$f" 2>/dev/null || true
-        done
+{% if ifn == 'Meta' %}
+    if [ -d "/sys/class/net/Meta" ]; then
+        _apply_perf_tuning_interface "Meta"
+    else
+        _schedule_meta_tuning_watcher
     fi
+{% else %}
+    _apply_perf_tuning_interface "{{ ifn }}"
+{% endif %}
 {% endfor %}
     if [ -f /proc/sys/net/core/rps_sock_flow_entries ]; then
         cur="$(cat /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true)"
@@ -78,6 +133,7 @@ _apply_perf_tuning() {
 }
 
 _cleanup_perf_tuning() {
+    _stop_meta_tuning_watcher
     [ -d /tmp/rpsxps-backup ] || return 0
     for b in /tmp/rpsxps-backup/_sys_class_net_*_rps_cpus.bak; do
         [ -f "$b" ] || continue
@@ -95,6 +151,18 @@ _cleanup_perf_tuning() {
         cat /tmp/rpsxps-backup/rps_sock_flow_entries.bak > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true
     fi
     logger -t lan-routing "performance_tuning cleanup applied from /tmp/rpsxps-backup"
+}
+
+_cleanup_mihomo_dns_redirect() {
+    iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p udp --dport 53 -j REDIRECT --to-ports {{ mihomo_dns_port }} 2>/dev/null || true
+    iptables -t nat -D PREROUTING -s {{ routing.lan_cidr }} -p tcp --dport 53 -j REDIRECT --to-ports {{ mihomo_dns_port }} 2>/dev/null || true
+}
+
+_apply_mihomo_dns_redirect() {
+    iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p udp --dport 53 -j REDIRECT --to-ports {{ mihomo_dns_port }} 2>/dev/null || \
+      iptables -t nat -I PREROUTING -s {{ routing.lan_cidr }} -p udp --dport 53 -j REDIRECT --to-ports {{ mihomo_dns_port }}
+    iptables -t nat -C PREROUTING -s {{ routing.lan_cidr }} -p tcp --dport 53 -j REDIRECT --to-ports {{ mihomo_dns_port }} 2>/dev/null || \
+      iptables -t nat -I PREROUTING -s {{ routing.lan_cidr }} -p tcp --dport 53 -j REDIRECT --to-ports {{ mihomo_dns_port }}
 }
 
 _start() {
@@ -149,8 +217,20 @@ _start() {
     _cleanup_v2raya_nat
     logger -t lan-routing "apply_iptables=false — NAT-redir mihomo не применялся (см. routing в router.yaml)"
 {% endif %}
+{% if mihomo_enabled and mihomo_dns_redirect_enabled %}
+    _apply_mihomo_dns_redirect
+    logger -t lan-routing "iptables DNS REDIRECT {{ routing.lan_cidr }}:53 -> mihomo:{{ mihomo_dns_port }}"
+{% else %}
+    _cleanup_mihomo_dns_redirect
+{% if not mihomo_enabled %}
+    logger -t lan-routing "mihomo DNS REDIRECT не применён: services.mihomo.enabled=false"
+{% else %}
+    logger -t lan-routing "mihomo DNS REDIRECT отключён: routing.mihomo_dns_redirect=false"
+{% endif %}
+{% endif %}
 {% else %}
 {# proxy_client v2raya #}
+    _cleanup_mihomo_dns_redirect
 {% if routing.apply_iptables | default(false) and v2raya_enabled and v2raya_mode == 'redirect' %}
     _cleanup_mihomo_nat
     if ! netstat -tlnp 2>/dev/null | grep -q ":{{ v2raya_redir }}.*{{ services.v2raya.container_name | default('v2raya') }}"; then
@@ -219,6 +299,7 @@ _start() {
 _stop() {
     _cleanup_mihomo_nat
     _cleanup_v2raya_nat
+    _cleanup_mihomo_dns_redirect
     _cleanup_tun_forward_accept
     _cleanup_perf_tuning
 {% if routing.block_quic | default(false) and not tun_enabled %}

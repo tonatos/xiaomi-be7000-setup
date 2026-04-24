@@ -510,10 +510,13 @@ routing:
     cpu_mask: "f"               # 4 ядра (CPU0-CPU3)
     rps_sock_flow_entries: 32768
     rps_flow_cnt: 4096
+    meta_wait_seconds: 30       # если Meta ещё не поднят, фоновой watcher подождёт и применит tuning
     interfaces: ["eth0", "br-lan", "Meta", "wl0", "wl1"]
 ```
 
 Параметры применяются скриптом `routing/lan-routing.sh` на `start` и откатываются на `stop`.
+
+Для DNS-пайплайна LAN по умолчанию включён `routing.mihomo_dns_redirect: true`: DNS-запросы клиентов LAN (TCP/UDP 53) принудительно редиректятся в `mihomo` на `routing.mihomo_dns_port` (по умолчанию `1053`). Это гарантирует, что fake-ip и доменные правила `mihomo` применяются даже при внешних апстримах `dnsmasq`.
 
 ### v2rayA
 

@@ -105,6 +105,8 @@ routing:
     cpu_mask: "f"
     rps_sock_flow_entries: 32768
     rps_flow_cnt: 4096
+    # Неблокирующее ожидание появления Meta в фоне (секунды).
+    meta_wait_seconds: 30
     interfaces:
       - "eth0"
       - "br-lan"
